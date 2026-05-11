@@ -1,6 +1,11 @@
 """
-Live Negotiation — 4-agent conversation view (Centrica + 3 vendors).
-Shows the negotiation as a unified chat thread, plus per-supplier price journey.
+Live Negotiation — separate vendor tabs.
+
+Each tab is a 1-on-1 conversation between the Sourcing Agent and a single vendor:
+  RFQ + specs  →  vendor quote  →  commercial analysis + counter  →  vendor response
+                                                                  →  award / decline.
+
+A final "Award Decision" tab summarises the cheapest-accepted-offer comparison.
 """
 import streamlit as st
 import sys, os
@@ -22,13 +27,13 @@ st.markdown("""
 .logo-text { font-size: 1.4rem; font-weight: 800; color: white; }
 .logo-sub  { font-size: 0.75rem; color: var(--mint); letter-spacing: 0.08em; font-weight: 500; }
 
-/* Persona avatars + colour coding */
-.chat-row { display: flex; gap: 0.75rem; margin-bottom: 0.8rem; align-items: flex-start; }
+/* Chat bubbles in vendor tabs */
+.chat-row { display: flex; gap: 0.75rem; margin-bottom: 0.9rem; align-items: flex-start; }
 .chat-row.right { flex-direction: row-reverse; }
 .avatar {
-    width: 42px; height: 42px; border-radius: 50%;
+    width: 44px; height: 44px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    font-weight: 800; color: white; flex-shrink: 0; font-size: 0.95rem;
+    font-weight: 800; color: white; flex-shrink: 0; font-size: 1rem;
     box-shadow: 0 2px 4px rgba(0,0,0,0.08);
 }
 .av-centrica  { background: linear-gradient(135deg,#0F2067,#9B2BF7); }
@@ -39,25 +44,25 @@ st.markdown("""
 .bubble {
     flex: 1;
     border-radius: 14px;
-    padding: 0.7rem 1rem;
+    padding: 0.85rem 1.05rem;
     font-size: 0.9rem;
-    line-height: 1.5;
+    line-height: 1.55;
     border: 1px solid #E5E7EB;
     background: white;
-    max-width: 75%;
+    max-width: 78%;
     box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
 .bubble.centrica   { background: #EEF2FF; border-color: #C7D2FE; }
 .bubble.trusted    { background: #F0FDF4; border-color: #BBF7D0; }
 .bubble.cheap      { background: #FFFBEB; border-color: #FDE68A; }
 .bubble.premium    { background: #F5F3FF; border-color: #DDD6FE; }
-.bubble.po         { background: linear-gradient(135deg,#DCFCE7,#F0FDF4); border: 2px solid #16A34A; font-weight: 500; }
-.bubble.rejection  { background: #FEF2F2; border-color: #FECACA; opacity: 0.85; }
+.bubble.po         { background: linear-gradient(135deg,#DCFCE7,#F0FDF4); border: 2px solid #16A34A; }
+.bubble.decline    { background: #FEF2F2; border-color: #FECACA; opacity: 0.92; }
 
 .bubble-meta {
     font-size: 0.72rem;
     color: #6B7280;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -75,25 +80,32 @@ st.markdown("""
     text-transform: none;
 }
 
-/* Supplier summary cards */
-.supplier-card {
+/* Vendor header card inside each tab */
+.vendor-header {
+    background: white;
     border: 1px solid #E5E7EB;
     border-radius: 12px;
-    padding: 1rem 1.2rem;
-    background: white;
-    height: 100%;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
 }
-.supplier-card.winner { border: 2px solid #16A34A; background: #F0FDF4; }
-.supplier-card.withdrawn { opacity: 0.65; }
+.vendor-header.winner    { border: 2px solid #16A34A; background: #F0FDF4; }
+.vendor-header.withdrawn { opacity: 0.7; }
 
 .tag { display:inline-block; padding:2px 8px; border-radius:99px; font-size:0.72rem; font-weight:700; margin-right:4px; }
-.tag-existing { background:#EEF2FF; color:#4F46E5; }
-.tag-scouted  { background:#FEF3C7; color:#D97706; }
-.tag-cheap    { background:#FEE2E2; color:#DC2626; }
-.tag-premium  { background:#EDE9FE; color:#7C3AED; }
-.tag-trusted  { background:#DCFCE7; color:#16A34A; }
-.tag-winner   { background:#16A34A; color:white; }
+.tag-existing  { background:#EEF2FF; color:#4F46E5; }
+.tag-scouted   { background:#FEF3C7; color:#D97706; }
+.tag-cheap     { background:#FEE2E2; color:#DC2626; }
+.tag-premium   { background:#EDE9FE; color:#7C3AED; }
+.tag-trusted   { background:#DCFCE7; color:#16A34A; }
+.tag-winner    { background:#16A34A; color:white; }
 .tag-withdrawn { background:#F3F4F6; color:#6B7280; }
+
+/* Decision tab table */
+.decision-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+.decision-table th { background: #0F2067; color: white; padding: 8px 12px; font-size: 0.82rem; text-align: left; }
+.decision-table td { padding: 9px 12px; font-size: 0.88rem; border-bottom: 1px solid #F3F4F6; }
+.decision-table tr.winner-row td { background: #F0FDF4; font-weight: 600; }
+.decision-table tr.withdrawn-row td { background: #FAFAFA; color: #9CA3AF; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -111,9 +123,9 @@ with st.sidebar:
     st.markdown("---")
 
 st.markdown("## 🔄 Live Negotiation")
-st.caption("4-agent negotiation conversation: Centrica Procurement Agent vs. 3 vendors with distinct strategies.")
+st.caption("The Sourcing Agent runs a separate, structured negotiation with each vendor — pick a tab to follow each conversation.")
 
-# ── Celebration banner if the user just completed a request ──────────────────
+# ── Celebration banner if user just completed a request ──────────────────────
 if st.session_state.get("just_completed") and st.session_state.get("negotiation_result"):
     result = st.session_state.negotiation_result
     if not result.get("escalated"):
@@ -132,11 +144,10 @@ if st.session_state.get("just_completed") and st.session_state.get("negotiation_
                 Delivery by <b>{result.get('delivery_date', '—')}</b>
             </div>
             <div style="font-size: 0.85rem; opacity: 0.85; margin-top: 8px;">
-                Below is the full 4-agent negotiation conversation that produced this outcome.
+                Open each vendor tab below to see the full 1-on-1 negotiation. The Award Decision tab shows the comparison.
             </div>
         </div>
         """, unsafe_allow_html=True)
-    # Clear the flag so it doesn't show again on subsequent visits
     st.session_state.just_completed = False
 
 # ── Request selector ───────────────────────────────────────────────────────────
@@ -150,7 +161,6 @@ request_options = {
     for r in all_requests
 }
 
-# Pre-select the just-created request if available
 default_index = 0
 preferred_id = st.session_state.get("last_request_id")
 if preferred_id:
@@ -165,7 +175,11 @@ request = db.get_request(request_id)
 negotiations = db.get_negotiations_for_request(request_id)
 po = db.get_po_for_request(request_id)
 
-# ── Header ─────────────────────────────────────────────────────────────────────
+if not request:
+    st.error("Request not found.")
+    st.stop()
+
+# ── Request header ─────────────────────────────────────────────────────────────
 status_color = {"completed":"🟢","awarded":"🟢","negotiating":"🟡","escalated":"🔴","intake":"🔵"}.get(request["status"],"⚪")
 st.markdown(f"### {status_color} {request['category']}")
 st.caption(f"_{request['description']}_")
@@ -181,129 +195,206 @@ if request["status"] == "escalated" and not negotiations:
     st.stop()
 
 if not negotiations:
-    st.info("Negotiation not started for this request.")
+    st.info("Negotiation has not started for this request.")
     st.stop()
 
-if po:
-    st.success(
-        f"✅ **{po['po_number']} issued** — Awarded for **£{po['total_value']:,.2f}**  ·  "
-        f"Savings: **£{po['savings_vs_budget']:,.0f}** ({po['savings_pct']:.1f}%)  ·  "
-        f"Delivery: {po.get('delivery_date', '—')}"
-    )
-
-# ── Supplier summary cards ─────────────────────────────────────────────────────
-st.markdown("### Supplier Lineup")
-cols = st.columns(len(negotiations))
-
-PERSONA_LABEL_MAP = {
-    "trusted_partner": ("Trusted Partner", "tag-trusted"),
-    "aggressive_cheap": ("Always Cheapest", "tag-cheap"),
-    "premium_walk": ("Premium / Walk-away", "tag-premium"),
-    # legacy strategy names
-    "terms-flex": ("Trusted Partner", "tag-trusted"),
-    "price-firm": ("Premium / Walk-away", "tag-premium"),
-    "walk-away": ("Premium / Walk-away", "tag-premium"),
+# ── Persona → avatar/colour map ───────────────────────────────────────────────
+PERSONA_VISUAL = {
+    "trusted_partner": ("trusted", "av-trusted", "🤝", "Trusted Partner",   "tag-trusted"),
+    "aggressive_cheap": ("cheap",  "av-cheap",   "💰", "Always Cheapest",   "tag-cheap"),
+    "premium_walk":    ("premium", "av-premium", "💎", "Premium Specialist","tag-premium"),
+    # legacy fallbacks
+    "terms-flex":      ("trusted", "av-trusted", "🤝", "Trusted Partner",   "tag-trusted"),
+    "price-firm":      ("premium", "av-premium", "💎", "Premium Specialist","tag-premium"),
+    "walk-away":       ("premium", "av-premium", "💎", "Premium Specialist","tag-premium"),
 }
 
-for col, neg in zip(cols, negotiations):
-    is_winner = bool(neg.get("winner"))
-    is_withdrawn = neg.get("status") == "rejected"
-    card_cls = "winner" if is_winner else ("withdrawn" if is_withdrawn else "")
+CENTRICA_VISUAL = ("centrica", "av-centrica", "🤖", "Sourcing Agent")
 
-    src_tag = "tag-existing" if neg.get("supplier_type") == "existing" else "tag-scouted"
-    src_lbl = "Existing Supplier" if neg.get("supplier_type") == "existing" else "Internet Scout"
-    p_lbl, p_tag = PERSONA_LABEL_MAP.get(neg.get("strategy") or "", ("—", "tag-existing"))
 
-    status_tag = ("tag-winner", "WINNER") if is_winner else (("tag-withdrawn", "WITHDREW") if is_withdrawn else ("tag-existing", "No deal"))
-    if neg.get("status") == "active" or (neg.get("status") == "rfq_sent" and not is_winner and not is_withdrawn):
-        status_tag = ("tag-existing", "Active")
-
-    with col:
-        st.markdown(f"""
-        <div class="supplier-card {card_cls}">
-            <div style="font-weight:800; font-size:1.0rem; margin-bottom:6px;">{neg['supplier_name']}</div>
-            <div style="margin-bottom:8px;">
-                <span class="tag {src_tag}">{src_lbl}</span>
-                <span class="tag {p_tag}">{p_lbl}</span>
-            </div>
-            <div style="font-size:0.78rem; color:#6B7280; margin-bottom:8px;">{neg.get('location','') or ''}</div>
-            <span class="tag {status_tag[0]}">{status_tag[1]}</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("")
-        init_price = neg.get("initial_price") or 0
-        current = neg.get("agreed_price") or neg.get("current_offer") or init_price
-        m1, m2 = st.columns(2)
-        m1.metric("Initial", f"£{init_price:,.0f}")
-        if is_winner and neg.get("agreed_price"):
-            m2.metric("Agreed", f"£{neg['agreed_price']:,.0f}", delta=f"−£{init_price - neg['agreed_price']:,.0f}")
-        elif is_withdrawn:
-            m2.metric("Withdrew", "—")
-        else:
-            m2.metric("Final", f"£{current:,.0f}")
-
-        if is_winner and neg.get("savings"):
-            st.markdown(f"**💰 Savings: £{neg['savings']:,.0f}**")
-        st.caption(f"Target £{neg.get('centrica_target',0):,.0f}  ·  {neg.get('payment_terms','—')}  ·  Rounds: {neg.get('round_number') or 1}")
-
-# ── Unified conversation thread ────────────────────────────────────────────────
-st.markdown("---")
-st.markdown("### 💬 Live Conversation")
-st.caption("All 4 agents in one thread — chronological order, as the negotiation actually happened.")
-
-# Build sender → persona+avatar map
-sender_meta = {"Centrica Procurement Agent": ("centrica", "av-centrica", "🤖", "Centrica")}
-for neg in negotiations:
-    pkey = neg.get("strategy") or ""
-    if pkey in ("trusted_partner", "terms-flex"):
-        cls, avc, icon, label = "trusted", "av-trusted", "🤝", "Trusted Partner"
-    elif pkey in ("aggressive_cheap",):
-        cls, avc, icon, label = "cheap", "av-cheap", "💰", "Always Cheapest"
-    elif pkey in ("premium_walk", "walk-away", "price-firm"):
-        cls, avc, icon, label = "premium", "av-premium", "💎", "Premium Specialist"
-    else:
-        cls, avc, icon, label = "trusted", "av-trusted", "🏢", "Vendor"
-    initials = "".join([w[0] for w in neg["supplier_name"].split()[:2]]).upper()
-    sender_meta[neg["supplier_name"]] = (cls, avc, initials, label)
-
-# Aggregate all negotiation messages for this request, sorted
-all_msgs = []
-for neg in negotiations:
-    for m in db.get_messages_for_negotiation(neg["id"]):
-        m["_persona"] = neg.get("strategy")
-        all_msgs.append(m)
-all_msgs.sort(key=lambda m: m.get("timestamp") or "")
-
-# Render conversation
-for msg in all_msgs:
+def _render_message(msg: dict, supplier_persona: str, supplier_name: str):
     sender = msg["sender"]
-    meta = sender_meta.get(sender, ("centrica", "av-centrica", "?", "Agent"))
-    cls, avc, icon, persona_label = meta
-    is_centrica = sender == "Centrica Procurement Agent"
-    is_po = msg.get("message_type") == "po"
-    is_rejection = msg.get("message_type") == "rejection"
-
-    bubble_cls = cls
-    if is_po:
-        bubble_cls = "po"
-    elif is_rejection:
-        bubble_cls = f"{cls} rejection"
-
-    row_dir = "right" if is_centrica else ""
+    mtype = msg.get("message_type", "chat")
     ts = (msg.get("timestamp") or "")[:16].replace("T", " ")
-
+    is_centrica = sender == "Centrica Procurement Agent"
     content_html = msg["content"].replace("\n", "<br>")
+
+    if is_centrica:
+        cls, avc, icon, lbl = CENTRICA_VISUAL
+        row_dir = "right"
+        bubble_cls = "centrica"
+        if mtype == "po":
+            bubble_cls = "po"
+        elif mtype == "rejection":
+            bubble_cls = "decline"
+    else:
+        v = PERSONA_VISUAL.get(supplier_persona, ("trusted", "av-trusted", "🏢", "Vendor", "tag-trusted"))
+        cls, avc, icon, lbl = v[0], v[1], v[2], v[3]
+        row_dir = ""
+        bubble_cls = cls
+        if mtype == "rejection":
+            bubble_cls = f"{cls} decline"
 
     st.markdown(f"""
     <div class="chat-row {row_dir}">
         <div class="avatar {avc}">{icon}</div>
         <div class="bubble {bubble_cls}">
-            <div class="bubble-meta">{sender}<span class="persona-tag">{persona_label}</span> · {ts}</div>
+            <div class="bubble-meta">{sender}<span class="persona-tag">{lbl}</span> · {ts}</div>
             {content_html}
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-st.markdown("---")
-st.caption(f"💡 Negotiation between **{len(negotiations)+1} agents** · {len(all_msgs)} messages exchanged · Full audit available in 🔍 Audit Trail")
+
+def _render_vendor_tab(neg: dict):
+    persona = neg.get("strategy") or ""
+    is_winner = bool(neg.get("winner"))
+    is_withdrawn = neg.get("status") == "rejected"
+    visual = PERSONA_VISUAL.get(persona, ("trusted", "av-trusted", "🏢", "Vendor", "tag-trusted"))
+    persona_label, persona_tag_cls = visual[3], visual[4]
+
+    src_tag = "tag-existing" if neg.get("supplier_type") == "existing" else "tag-scouted"
+    src_lbl = "Existing Supplier" if neg.get("supplier_type") == "existing" else "Internet Scout"
+
+    header_cls = "winner" if is_winner else ("withdrawn" if is_withdrawn else "")
+    init_price = neg.get("initial_price") or 0
+    current = neg.get("agreed_price") or neg.get("current_offer") or init_price
+
+    if is_winner:
+        status_html = '<span class="tag tag-winner">🏆 WINNER</span>'
+    elif is_withdrawn:
+        status_html = '<span class="tag tag-withdrawn">WITHDREW</span>'
+    elif neg.get("agreed_price"):
+        status_html = '<span class="tag tag-trusted">Accepted (runner-up)</span>'
+    else:
+        status_html = '<span class="tag tag-existing">In progress</span>'
+
+    st.markdown(f"""
+    <div class="vendor-header {header_cls}">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div>
+                <div style="font-weight:800; font-size:1.05rem;">{neg['supplier_name']}</div>
+                <div style="font-size:0.8rem; color:#6B7280; margin-top:2px;">{neg.get('location','') or ''}</div>
+            </div>
+            <div>
+                <span class="tag {src_tag}">{src_lbl}</span>
+                <span class="tag {persona_tag_cls}">{persona_label}</span>
+                {status_html}
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Initial Quote", f"£{init_price:,.0f}")
+    if is_winner and neg.get("agreed_price"):
+        m2.metric("Final Agreed", f"£{neg['agreed_price']:,.0f}", delta=f"−£{init_price - neg['agreed_price']:,.0f}")
+    elif is_withdrawn:
+        m2.metric("Final", "Withdrew")
+    else:
+        m2.metric("Final", f"£{current:,.0f}")
+    m3.metric("Payment", neg.get('payment_terms', '—'))
+    m4.metric("Rounds", neg.get('round_number') or 1)
+
+    st.markdown("**Conversation**")
+    msgs = db.get_messages_for_negotiation(neg["id"])
+    for m in msgs:
+        _render_message(m, persona, neg["supplier_name"])
+
+
+# ── Build tab labels with persona + status icons ─────────────────────────────
+def _tab_label(neg: dict) -> str:
+    persona = neg.get("strategy") or ""
+    visual = PERSONA_VISUAL.get(persona, ("trusted", "av-trusted", "🏢", "Vendor", "tag-trusted"))
+    icon = visual[2]
+    suffix = " 🏆" if neg.get("winner") else (" 🚫" if neg.get("status") == "rejected" else "")
+    return f"{icon} {neg['supplier_name']}{suffix}"
+
+
+tab_labels = [_tab_label(n) for n in negotiations] + ["📊 Award Decision"]
+tabs = st.tabs(tab_labels)
+
+for tab, neg in zip(tabs[:-1], negotiations):
+    with tab:
+        _render_vendor_tab(neg)
+
+# ── Award Decision tab ────────────────────────────────────────────────────────
+with tabs[-1]:
+    st.markdown("### Sourcing Agent — Award Decision")
+    st.caption("Rule: the **lowest accepted offer** wins. Walk-aways and declined counters are excluded.")
+
+    rows_html = ""
+    accepted_count = 0
+    for neg in negotiations:
+        persona = neg.get("strategy") or ""
+        visual = PERSONA_VISUAL.get(persona, ("trusted", "av-trusted", "🏢", "Vendor", "tag-trusted"))
+        persona_label = visual[3]
+
+        if neg.get("winner"):
+            row_cls = "winner-row"
+            verdict = "🏆 <b>AWARDED</b>"
+        elif neg.get("status") == "rejected":
+            row_cls = "withdrawn-row"
+            verdict = "Withdrew"
+        elif neg.get("agreed_price"):
+            row_cls = ""
+            verdict = "Runner-up"
+        else:
+            row_cls = ""
+            verdict = "No deal"
+
+        if neg.get("agreed_price"):
+            final_str = f"£{neg['agreed_price']:,.0f}"
+            accepted_count += 1
+        elif neg.get("status") == "rejected":
+            final_str = "—"
+        else:
+            final_str = f"£{neg.get('current_offer', 0):,.0f}"
+
+        rows_html += f"""
+        <tr class="{row_cls}">
+            <td><b>{neg['supplier_name']}</b></td>
+            <td>{persona_label}</td>
+            <td>{"Existing" if neg.get('supplier_type') == 'existing' else "Scouted"}</td>
+            <td>£{neg.get('initial_price', 0):,.0f}</td>
+            <td>{final_str}</td>
+            <td>{neg.get('payment_terms', '—')}</td>
+            <td>{neg.get('delivery_days', '—')} days</td>
+            <td>{verdict}</td>
+        </tr>
+        """
+
+    st.markdown(f"""
+    <table class="decision-table">
+        <thead>
+            <tr>
+                <th>Vendor</th><th>Persona</th><th>Source</th>
+                <th>Initial</th><th>Final</th>
+                <th>Payment</th><th>Delivery</th><th>Outcome</th>
+            </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+    </table>
+    """, unsafe_allow_html=True)
+
+    st.markdown("")
+
+    if po:
+        budget = request.get("max_budget", 0) or 0
+        st.success(
+            f"**Purchase Order {po['po_number']} issued** — total **£{po['total_value']:,.2f}** · "
+            f"Savings vs buyer budget £{budget:,.0f}: **£{po['savings_vs_budget']:,.0f}** ({po['savings_pct']:.1f}%) · "
+            f"Payment **{po.get('payment_terms','—')}** · Delivery by **{po.get('delivery_date','—')}**"
+        )
+
+        st.markdown(f"""
+        **Sourcing Agent reasoning:**
+        - {accepted_count} of {len(negotiations)} suppliers reached agreement.
+        - Of those, the **lowest accepted bid** was selected.
+        - Total negotiation: {sum(len(db.get_messages_for_negotiation(n['id'])) for n in negotiations)} messages exchanged
+          across {len(negotiations)} parallel vendor conversations.
+        """)
+    elif request["status"] == "escalated":
+        st.error("⚠️ No supplier reached agreement within budget. Request escalated to Category Manager.")
+    else:
+        st.info("Negotiation still in progress.")

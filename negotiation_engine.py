@@ -1,14 +1,21 @@
 """
-Autonomous negotiation engine — 4-agent demo conversation.
+Autonomous negotiation engine — sourcing agent vs. 3 vendor agents in parallel.
 
-Roles:
-  • Centrica Procurement Agent — sources, sends RFQ, counter-offers, awards PO.
-  • Vendor A (existing supplier) — "Trusted Partner": mid-price, flexible, terms-driven.
-  • Vendor B (scouted, ALWAYS CHEAPEST) — "Aggressive Newcomer": low price, hungry for the deal.
-  • Vendor C (scouted, ALWAYS MOST EXPENSIVE) — "Premium Specialist": high price, walks away if pushed.
+The sourcing agent runs a SEPARATE structured conversation with each vendor:
+  1. Sends RFQ with full specifications.
+  2. Receives initial quote (price + breakdown + value-add).
+  3. Sends commercial analysis + counter-offer.
+  4. Receives vendor response (accept / counter / walk away).
+  5. Optional second round.
+  6. Sends final award or polite decline notification.
 
-Vendor B usually wins. Vendor A is a strong second on relationship/terms.
-Vendor C usually withdraws. Fully deterministic; runs in <1 second.
+The award rule is explicit: the LOWEST accepted offer wins. Walk-aways and
+declined counters are excluded. The award notification quotes the comparison.
+
+Personas (fully deterministic):
+  • Trusted Partner (existing supplier) — mid price, relationship-led, flexible
+  • Aggressive Newcomer (scouted)       — ALWAYS cheapest initial bid
+  • Premium Specialist (scouted)        — ALWAYS most expensive, often walks away
 """
 import random
 from datetime import datetime, timedelta
@@ -101,147 +108,301 @@ def scout_internet_suppliers(category: str, request_id: str) -> list[dict]:
 
 # ── Persona archetypes ────────────────────────────────────────────────────────
 
-# Each persona has: pricing multipliers, payment terms, delivery, voice.
 PERSONAS = {
     "trusted_partner": {
         "label": "Trusted Partner",
-        "initial_mult": 0.95,   # 95% of budget
-        "best_mult":    0.87,   # can drop to 87%
+        "initial_mult": 0.95,
+        "best_mult":    0.87,
         "payment":      "Net 45",
         "delivery":     7,
         "will_walk_away": False,
-        "will_accept_threshold": 0.92,  # accepts counters above 92% of own initial
+        "will_accept_threshold": 0.92,
     },
     "aggressive_cheap": {
         "label": "Aggressive Newcomer",
-        "initial_mult": 0.85,   # 85% of budget — cheapest start
-        "best_mult":    0.79,   # can drop to 79%
+        "initial_mult": 0.85,
+        "best_mult":    0.79,
         "payment":      "Net 30",
         "delivery":     10,
         "will_walk_away": False,
-        "will_accept_threshold": 0.94,  # very eager to win
+        "will_accept_threshold": 0.94,
     },
     "premium_walk": {
         "label": "Premium Specialist",
-        "initial_mult": 1.07,   # 107% of budget — most expensive
-        "best_mult":    1.02,   # won't go below 102% of budget
+        "initial_mult": 1.07,
+        "best_mult":    1.02,
         "payment":      "Net 30",
         "delivery":     14,
         "will_walk_away": True,
-        "will_accept_threshold": 0.99,  # only accepts if hardly any concession needed
+        "will_accept_threshold": 0.99,
     },
 }
 
 
-# ── Voice templates per persona ───────────────────────────────────────────────
+# ── Category-specific spec hints (lifts realism) ──────────────────────────────
 
-def _rfq_message(sup_name: str, target: float, source_label: str) -> str:
+CATEGORY_SPECS = {
+    "IT Equipment & Software": (
+        "Tier-1 OEM hardware (Dell / HP / Lenovo); UK keyboard layout; 3-year warranty; "
+        "asset-tagging and pre-configured Centrica SOE image; secure disposal of any returned units."
+    ),
+    "Facilities Management": (
+        "Site access compliance (Centrica passport scheme); ISO 9001 + ISO 45001; "
+        "DBS-checked engineers; 4-hour reactive SLA; quarterly KPI reporting."
+    ),
+    "Professional Services": (
+        "SRA-regulated / chartered practitioners; conflict-check clearance; agreed rate card; "
+        "fixed-fee or capped-fee preferred; monthly burn-down reporting."
+    ),
+    "Fleet & Transport": (
+        "DVSA-authorised facilities; mobile servicing option; BVRLA membership; "
+        "consolidated monthly invoicing; downtime SLA."
+    ),
+    "Engineering & Maintenance": (
+        "NICEIC / IET registered engineers; method statements + RAMS; "
+        "24/7 emergency callout; spare-parts holding included."
+    ),
+    "Office Supplies & Furniture": (
+        "FIRA Gold or equivalent; 5-year warranty on mechanism; "
+        "Centrica navy frame option; delivery + installation included."
+    ),
+    "Health & Safety Equipment": (
+        "EN ISO standards-compliant; CE / UKCA marked; "
+        "lot traceability; volume discount tiering."
+    ),
+    "Marketing & Communications": (
+        "Brand-compliant deliverables; IP transfer in deliverables; "
+        "ISO 27001 for any data-handling; agreed milestone payment plan."
+    ),
+}
+
+
+# ── Voice templates ──────────────────────────────────────────────────────────
+
+def _rfq_message(sup_name: str, intake: dict, target: float, source_label: str) -> str:
+    qty = intake.get("quantity", 1)
+    unit = intake.get("unit", "units")
+    cat = intake.get("category", "Goods/Services")
+    bu = intake.get("business_unit", "Centrica")
+    required_by = intake.get("required_by", "TBC")
+    description = intake.get("description", "")
+    specs = CATEGORY_SPECS.get(cat, "Standard Centrica supplier T&Cs apply.")
+
     return (
-        f"RFQ issued to **{sup_name}** ({source_label}). "
-        f"Target price communicated: £{target:,.0f}. Standard Centrica T&Cs apply. Response requested within 24 hours."
+        f"**📋 RFQ-{datetime.utcnow().year}-{random.randint(1000,9999)} — Centrica Procurement**\n\n"
+        f"To: {sup_name} _( {source_label} )_\n"
+        f"From: Centrica Procurement Agent\n\n"
+        f"Centrica is sourcing the following:\n\n"
+        f"• **Category:** {cat}\n"
+        f"• **Item:** {description}\n"
+        f"• **Quantity:** {qty} {unit}\n"
+        f"• **Business Unit:** {bu}\n"
+        f"• **Required by:** {required_by}\n"
+        f"• **Technical specifications:** {specs}\n"
+        f"• **Payment terms:** Net 30 (standard); Net 45/60 considered in exchange for sharper pricing\n"
+        f"• **Centrica indicative target:** £{target:,.0f}\n\n"
+        f"Please submit your best initial quotation within 24 hours. "
+        f"Include unit price, total, delivery timeline, warranty and any value-adds."
     )
 
 
-def _initial_offer_msg(sup_name: str, price: float, persona_key: str, intake: dict) -> str:
+def _initial_offer_msg(sup_name: str, price: float, persona_key: str, intake: dict, delivery: int) -> str:
     qty = intake.get('quantity', 1)
     unit = intake.get('unit', 'units')
+    unit_price = price / max(qty, 1)
+
     if persona_key == "trusted_partner":
         return (
-            f"Hello Centrica team — thank you for the opportunity. As your long-standing partner, "
-            f"{sup_name} is pleased to submit £{price:,.2f} for {qty} {unit}, on Net 45 terms with "
-            f"7-day delivery from our Birmingham hub. Given our existing framework agreement, we can "
-            f"flex on payment terms or include an extended SLA at no charge. Happy to discuss."
+            f"Hello Centrica team — thank you for inviting us to tender.\n\n"
+            f"As your long-standing partner, **{sup_name}** is pleased to submit:\n\n"
+            f"• **Unit price:** £{unit_price:,.2f} × {qty} {unit}\n"
+            f"• **Total:** **£{price:,.2f}**\n"
+            f"• **Payment terms:** Net 45\n"
+            f"• **Delivery:** {delivery} working days from PO\n"
+            f"• **Warranty:** Standard 3-year, extendable to 5-year at no charge given our framework\n"
+            f"• **Value-add:** Account director continuity, free annual service review, priority callout\n\n"
+            f"Given the existing relationship we'd welcome a discussion on payment terms "
+            f"or a multi-year extension if helpful. Happy to flex."
         )
     if persona_key == "aggressive_cheap":
         return (
-            f"Many thanks for the RFQ. {sup_name} is going in sharp at £{price:,.2f} for the full {qty} {unit} "
-            f"scope — this is our most aggressive market price and beats our list by 15%. Net 30 terms, "
-            f"10-day delivery, full warranty included. We're actively building our Centrica relationship "
-            f"and are highly motivated to win this contract."
+            f"Many thanks for the RFQ — **{sup_name}** is going in sharp.\n\n"
+            f"• **Unit price:** £{unit_price:,.2f} × {qty} {unit}\n"
+            f"• **Total:** **£{price:,.2f}**  _(15% below our published list)_\n"
+            f"• **Payment terms:** Net 30\n"
+            f"• **Delivery:** {delivery} working days, expedite available\n"
+            f"• **Warranty:** Full 3-year manufacturer + 1-year {sup_name} extended\n"
+            f"• **Value-add:** Free deployment kit, dedicated implementation manager, named SLA\n\n"
+            f"We're actively building our Centrica relationship and are **highly motivated** "
+            f"to win this contract. Open to a sharper price for a 2-year commitment."
         )
     # premium_walk
     return (
-        f"Thank you for inviting {sup_name} to tender. Our quotation is £{price:,.2f} for the specified "
-        f"scope of {qty} {unit}. This reflects our premium service standard: dedicated account team, "
-        f"24/7 priority support, 5-year extended warranty, and ISO 27001-certified delivery. We don't "
-        f"compete on headline price — we compete on total cost of ownership and risk."
+        f"Thank you for inviting **{sup_name}** to tender.\n\n"
+        f"Our quotation reflects premium service standards — we don't compete on headline price.\n\n"
+        f"• **Unit price:** £{unit_price:,.2f} × {qty} {unit}\n"
+        f"• **Total:** **£{price:,.2f}**\n"
+        f"• **Payment terms:** Net 30\n"
+        f"• **Delivery:** {delivery} working days\n"
+        f"• **Warranty:** 5-year extended, full parts + labour, on-site response\n"
+        f"• **Value-add:** Dedicated account team, ISO 27001-certified delivery, "
+        f"24/7 priority support, executive QBRs\n\n"
+        f"This represents fair value when total cost of ownership is considered."
     )
 
 
-def _centrica_counter_msg(sup_name: str, persona_key: str, current_offer: float, target: float, round_num: int) -> str:
+def _centrica_analysis_msg(sup_name: str, current_offer: float, target: float, persona_key: str, round_num: int) -> str:
     gap_pct = (current_offer - target) / current_offer * 100
-    counter = target * (1.02 if round_num == 1 else 1.0)
+    counter = round(target * (1.02 if round_num == 1 else 1.0), -1)
+    persona_lbl = PERSONAS[persona_key]["label"]
+
+    header = (
+        f"**🤖 Sourcing Agent — Commercial Analysis**\n\n"
+        f"Reviewing {sup_name}'s offer ({persona_lbl}):\n\n"
+        f"• Submitted: **£{current_offer:,.2f}**\n"
+        f"• Centrica target: **£{target:,.0f}**\n"
+        f"• Variance: **{gap_pct:+.1f}%**\n"
+        f"• Round: **{round_num} of 2**\n\n"
+    )
 
     if persona_key == "aggressive_cheap":
-        return (
-            f"@{sup_name} — strong opening price, thank you. We see room to align further at "
-            f"£{counter:,.2f}. Given the volume and our pipeline, we believe this represents fair value "
-            f"for both parties. Open to early-pay discount in exchange. Centrica Procurement Agent."
+        body = (
+            f"Strong opening — already the most competitive bid received. "
+            f"To finalise within budget, we propose **£{counter:,.0f}**. "
+            f"In exchange we can offer:\n\n"
+            f"• 2% early-pay discount in return for the sharper price, OR\n"
+            f"• 24-month volume commitment to lock in the relationship.\n\n"
+            f"Please confirm — keen to close quickly given your pricing."
         )
-    if persona_key == "premium_walk":
-        return (
-            f"@{sup_name} — we acknowledge the premium positioning, but £{current_offer:,.2f} is {gap_pct:.1f}% "
-            f"above our budget envelope. To progress, we need to see £{counter:,.2f}. We can offer Net 60 "
-            f"payment terms or a multi-year volume commitment in exchange. Please review."
+    elif persona_key == "premium_walk":
+        body = (
+            f"We recognise the premium positioning. However, £{current_offer:,.2f} is "
+            f"materially above our budget envelope and would require executive sign-off. "
+            f"To progress, we need to see **£{counter:,.0f}**.\n\n"
+            f"In exchange we can offer:\n\n"
+            f"• Net 60 payment terms, OR\n"
+            f"• Multi-year framework commitment.\n\n"
+            f"Please confirm whether this is feasible."
         )
-    # trusted_partner
-    return (
-        f"@{sup_name} — thank you for the constructive proposal. To stay within budget, we are countering "
-        f"at £{counter:,.2f}. As a valued partner, we'd like to maintain this relationship — we can offer "
-        f"a 24-month framework extension and earlier payment if the price works for you. Let us know."
-    )
+    else:  # trusted_partner
+        body = (
+            f"Thank you for the constructive proposal. To stay within the buyer's budget, "
+            f"we are countering at **£{counter:,.0f}**. We'd like to preserve this relationship — "
+            f"in exchange we can offer:\n\n"
+            f"• 24-month framework renewal with annual price review, AND\n"
+            f"• Net 30 (vs your Net 45) with 1.5% early-pay discount.\n\n"
+            f"Let us know if this works."
+        )
+
+    return header + body
 
 
 def _supplier_counter_response_msg(sup_name: str, persona_key: str, final: float | None,
                                     accepted: bool, round_num: int) -> str:
-    if final is None:  # walk away
+    if final is None:  # walk-away
         return (
-            f"After careful review, {sup_name} regrets that the requested price does not allow us to "
-            f"maintain our service standards. We must respectfully withdraw from this tender. "
-            f"We remain interested in future opportunities where total value, not just price, is the "
-            f"deciding factor. Thank you for the engagement."
+            f"Centrica team — thank you for the engagement.\n\n"
+            f"After careful review, **{sup_name}** regrets that the requested price does not "
+            f"preserve our service standards. We must respectfully **withdraw from this tender**.\n\n"
+            f"We remain interested in future opportunities where total value, not just price, "
+            f"is the deciding factor. Best wishes for a successful procurement."
         )
+
     if accepted:
         if persona_key == "trusted_partner":
             return (
-                f"Centrica team — we appreciate the partnership-led approach. {sup_name} confirms acceptance "
-                f"at £{final:,.2f} with Net 45 payment, plus the 24-month framework extension. "
-                f"Our team is ready to mobilise on PO receipt. Thank you."
+                f"We appreciate the partnership-led approach. \n\n"
+                f"**{sup_name} confirms acceptance** at **£{final:,.2f}** with:\n\n"
+                f"• Payment terms: Net 45 (as offered)\n"
+                f"• 24-month framework extension agreed\n"
+                f"• Delivery within original commitment\n\n"
+                f"Our team is ready to mobilise on PO receipt. Thank you for your continued partnership."
             )
         if persona_key == "aggressive_cheap":
             return (
-                f"Deal. {sup_name} confirms £{final:,.2f} — best price in market for this spec. "
-                f"Locked in with 10-day delivery and full warranty. PO received and we'll start "
-                f"production immediately. Looking forward to a long Centrica relationship."
+                f"**Deal — {sup_name} confirms £{final:,.2f}.**\n\n"
+                f"• Sharpest price in market for this specification\n"
+                f"• Net 30 payment terms locked in\n"
+                f"• Full delivery + warranty as quoted\n"
+                f"• Production starts immediately on PO receipt\n\n"
+                f"Looking forward to a long and successful Centrica relationship. "
+                f"Please send the PO to our enterprise team."
             )
+        # premium_walk accepted (rare)
         return (
-            f"{sup_name} confirms acceptance at £{final:,.2f}. The Net 60 payment term works for us. "
-            f"This price preserves our service standards and we commit to flawless delivery. "
-            f"Welcome to the {sup_name} client portfolio."
+            f"**{sup_name} confirms acceptance at £{final:,.2f}.**\n\n"
+            f"Net 60 payment term works for us. This price preserves our service standards. "
+            f"We commit to flawless delivery and welcome Centrica to our enterprise client portfolio."
         )
-    # countered back (price-firm or partial concession)
+
+    # countered back (not accepted)
     if persona_key == "premium_walk":
         return (
-            f"{sup_name} can move to £{final:,.2f} as our absolute best-and-final position. "
+            f"**{sup_name}** can move to **£{final:,.2f}** as our absolute best-and-final position.\n\n"
             f"This is below our standard margin and only viable given the volume on offer. "
-            f"We trust this demonstrates our commitment without compromising service quality."
+            f"We trust this demonstrates our commitment without compromising the service standards "
+            f"that Centrica requires."
         )
     if persona_key == "trusted_partner":
         return (
-            f"Thank you. {sup_name} can come down to £{final:,.2f} — a meaningful concession from our "
-            f"side that reflects the value of the Centrica relationship. We hope this lands us in "
-            f"contract-award position."
+            f"Thank you. **{sup_name}** can come down to **£{final:,.2f}** — a meaningful concession "
+            f"that reflects the value we place on the Centrica relationship.\n\n"
+            f"We hope this lands us in award position. Open to further conversation if needed."
         )
     return (
-        f"Centrica — we can sharpen to £{final:,.2f}, marginally below our initial offer. This is our "
-        f"hungry-for-the-business price. Hope this gets us over the line."
+        f"Centrica — **{sup_name}** can sharpen to **£{final:,.2f}**, below our initial offer. "
+        f"This is our hungry-for-the-business price. Hope this gets us over the line."
     )
 
 
-def _centrica_acceptance_msg(sup_name: str, price: float) -> str:
+def _award_winner_msg(sup_name: str, price: float, po_number: str, all_offers: list, savings: float, savings_pct: float) -> str:
+    """The award notification sent to the WINNING vendor."""
+    comparison = "\n".join(
+        f"• {o['name']} ({PERSONAS[o['persona']]['label']}): "
+        + (f"£{o['final']:,.0f}" if o['final'] else "withdrew")
+        for o in all_offers
+    )
     return (
-        f"@{sup_name} — offer within target range. Acceptance confirmed at £{price:,.2f}. "
-        f"Centrica Procurement Agent."
+        f"🏆 **AWARD NOTIFICATION — PO {po_number}**\n\n"
+        f"After comparing all three offers, the Sourcing Agent has selected **{sup_name}** "
+        f"as the **lowest accepted bid** at **£{price:,.2f}**.\n\n"
+        f"**Comparison summary:**\n{comparison}\n\n"
+        f"**Outcome:**\n"
+        f"• Savings vs buyer budget: £{savings:,.0f} ({savings_pct:.1f}%)\n"
+        f"• PO {po_number} issued to {sup_name}\n"
+        f"• Other suppliers being notified now\n\n"
+        f"Congratulations — please confirm PO acknowledgement within 48 hours."
+    )
+
+
+def _decline_msg(sup_name: str, winning_price: float, your_price: float | None, winner_name: str) -> str:
+    """Polite decline message to losing vendors."""
+    if your_price is None:
+        # they withdrew earlier - just acknowledge
+        return (
+            f"Centrica acknowledges {sup_name}'s withdrawal from this tender. "
+            f"For your information, the contract has been awarded to **{winner_name}** "
+            f"at **£{winning_price:,.2f}**.\n\n"
+            f"We will keep {sup_name} engaged for future opportunities — thank you for your participation."
+        )
+    return (
+        f"**Thank you for your participation — Tender outcome notification**\n\n"
+        f"After careful evaluation of all three offers, Centrica has selected another supplier "
+        f"for this requirement.\n\n"
+        f"• Awarded supplier: **{winner_name}**\n"
+        f"• Winning price: **£{winning_price:,.2f}**\n"
+        f"• Your final offer: £{your_price:,.2f}\n\n"
+        f"We value the time {sup_name} invested in this RFQ and look forward to inviting you "
+        f"to future tenders. The Sourcing Agent will keep your account active on our pre-qualified list."
+    )
+
+
+def _centrica_inline_acceptance_msg(sup_name: str, price: float) -> str:
+    """When the initial offer is already within target — accept immediately."""
+    return (
+        f"**🤖 Sourcing Agent — Offer Accepted**\n\n"
+        f"{sup_name}'s offer of £{price:,.2f} is within our target range. "
+        f"No counter required. Provisional acceptance recorded pending final award decision."
     )
 
 
@@ -264,7 +425,7 @@ def run_negotiation(request_id: str, intake: dict, progress_cb=None) -> dict:
     base_dt = datetime.fromisoformat(now_iso)
     budget = intake.get("max_budget", 10000)
     category = intake.get("category", "Other")
-    target = budget * 0.88  # internal Centrica target: 12% below buyer budget
+    target = budget * 0.88
 
     if intake.get("risk_tier") == "high":
         db.update_request_status(request_id, "escalated")
@@ -283,16 +444,16 @@ def run_negotiation(request_id: str, intake: dict, progress_cb=None) -> dict:
     _p("Scouting 2 market suppliers via internet search...", 30)
     scouted = scout_internet_suppliers(category, request_id)
 
-    # Assign personas: trusted_partner (existing), aggressive_cheap (first scout), premium_walk (second scout)
     all_sups = [existing_sup, scouted[0], scouted[1]]
     persona_keys = ["trusted_partner", "aggressive_cheap", "premium_walk"]
 
-    _p("Broadcasting RFQ to all 3 suppliers...", 45)
+    _p("Sourcing Agent dispatching RFQs to all 3 suppliers...", 45)
     db.update_request_status(request_id, "negotiating")
 
     negs = []
     minute_offset = 0
 
+    # ── Stage 1: RFQ + initial offers per vendor ─────────────────────────────
     for i, (sup, pkey) in enumerate(zip(all_sups, persona_keys)):
         persona = PERSONAS[pkey]
         neg_id = f"neg-{request_id[-8:]}-{i+1}"
@@ -308,22 +469,22 @@ def run_negotiation(request_id: str, intake: dict, progress_cb=None) -> dict:
         })
         db.update_negotiation(neg_id, {"current_offer": price, "round_number": 1})
 
-        # 1) Centrica sends RFQ
+        # 1. RFQ with full specs
         minute_offset += 1
         db.insert_message({
             "request_id": request_id, "negotiation_id": neg_id,
             "sender": "Centrica Procurement Agent",
-            "content": _rfq_message(sup["name"], target, sup["source"].replace("_", " ").title()),
+            "content": _rfq_message(sup["name"], intake, target, sup["source"].replace("_", " ").title()),
             "message_type": "rfq",
             "timestamp": (base_dt + timedelta(minutes=minute_offset)).isoformat(),
         })
 
-        # 2) Vendor sends initial offer
-        minute_offset += 3
+        # 2. Vendor initial quote
+        minute_offset += 4
         db.insert_message({
             "request_id": request_id, "negotiation_id": neg_id,
             "sender": sup["name"],
-            "content": _initial_offer_msg(sup["name"], price, pkey, intake),
+            "content": _initial_offer_msg(sup["name"], price, pkey, intake, delivery),
             "message_type": "offer",
             "timestamp": (base_dt + timedelta(minutes=minute_offset)).isoformat(),
         })
@@ -335,9 +496,9 @@ def run_negotiation(request_id: str, intake: dict, progress_cb=None) -> dict:
             "payment_terms": payment, "delivery_days": delivery, "round_number": 1,
         })
 
-    _p("Evaluating offers — Centrica Agent preparing counter-offers...", 60)
+    _p("Evaluating offers — preparing counter-offers...", 60)
 
-    # ── Counter rounds (up to 2) ─────────────────────────────────────────────
+    # ── Stage 2: Counter rounds (up to 2 per vendor) ─────────────────────────
     for rnd in range(1, 3):
         any_open = False
         for neg in negs:
@@ -348,12 +509,12 @@ def run_negotiation(request_id: str, intake: dict, progress_cb=None) -> dict:
             persona = PERSONAS[neg["persona"]]
             gap_pct = (neg["current_offer"] - target) / neg["current_offer"] * 100
 
-            minute_offset += 5
-            ts_counter = (base_dt + timedelta(minutes=minute_offset)).isoformat()
-            minute_offset += 3
-            ts_response = (base_dt + timedelta(minutes=minute_offset)).isoformat()
+            minute_offset += 6
+            ts_centrica = (base_dt + timedelta(minutes=minute_offset)).isoformat()
+            minute_offset += 4
+            ts_vendor = (base_dt + timedelta(minutes=minute_offset)).isoformat()
 
-            # If already within 3% of target, accept directly
+            # If already within 3% of target, accept directly with analysis message
             if gap_pct <= 3:
                 neg["agreed_price"] = neg["current_offer"]
                 db.update_negotiation(neg["id"], {
@@ -362,39 +523,33 @@ def run_negotiation(request_id: str, intake: dict, progress_cb=None) -> dict:
                 db.insert_message({
                     "request_id": request_id, "negotiation_id": neg["id"],
                     "sender": "Centrica Procurement Agent",
-                    "content": _centrica_acceptance_msg(sup["name"], neg["current_offer"]),
-                    "message_type": "acceptance", "timestamp": ts_counter,
+                    "content": _centrica_inline_acceptance_msg(sup["name"], neg["current_offer"]),
+                    "message_type": "acceptance", "timestamp": ts_centrica,
                 })
                 continue
 
-            counter_price = round(target * (1.02 if rnd == 1 else 1.0), -1)
-
-            # Centrica counter-offer
+            # Centrica's commercial analysis + counter
             db.insert_message({
                 "request_id": request_id, "negotiation_id": neg["id"],
                 "sender": "Centrica Procurement Agent",
-                "content": _centrica_counter_msg(sup["name"], neg["persona"], neg["current_offer"], target, rnd),
-                "message_type": "counter", "timestamp": ts_counter,
+                "content": _centrica_analysis_msg(sup["name"], neg["current_offer"], target, neg["persona"], rnd),
+                "message_type": "counter", "timestamp": ts_centrica,
             })
 
             # Vendor response — deterministic per persona
             initial = neg["initial_price"]
             best_price = round(budget * persona["best_mult"], -1)
             accept_threshold = initial * persona["will_accept_threshold"]
+            counter_price = round(target * (1.02 if rnd == 1 else 1.0), -1)
 
             if persona["will_walk_away"] and counter_price < best_price * 0.97:
-                # Premium specialist walks away
                 final, accepted = None, False
             elif counter_price >= accept_threshold:
-                # Accept counter directly
                 final, accepted = counter_price, True
             elif counter_price >= best_price:
-                # Meet in the middle: vendor accepts at counter price
                 final, accepted = counter_price, True
             else:
-                # Vendor offers their best price (may or may not be accepted)
                 final = best_price
-                # If best_price is still meaningfully above target and we're past round 1, accept it
                 if rnd >= 2 and final <= target * 1.04:
                     accepted = True
                 else:
@@ -405,7 +560,7 @@ def run_negotiation(request_id: str, intake: dict, progress_cb=None) -> dict:
                 "sender": sup["name"],
                 "content": _supplier_counter_response_msg(sup["name"], neg["persona"], final, accepted, rnd),
                 "message_type": "acceptance" if accepted else ("rejection" if final is None else "counter"),
-                "timestamp": ts_response,
+                "timestamp": ts_vendor,
             })
 
             if final is None:
@@ -425,10 +580,21 @@ def run_negotiation(request_id: str, intake: dict, progress_cb=None) -> dict:
         if not any_open:
             break
 
-    _p("Selecting best offer and issuing Purchase Order...", 85)
+    _p("Selecting cheapest accepted offer and issuing PO...", 85)
 
+    # ── Stage 3: Award + per-vendor notifications ────────────────────────────
     winner_id = _pick_winner(negs)
     result = {"escalated": False, "negotiations": negs}
+
+    # Build comparison data for award message
+    all_offers = []
+    for n in negs:
+        final_p = n.get("agreed_price") or (None if n.get("withdrawn") else n.get("current_offer"))
+        all_offers.append({
+            "name": n["supplier_name"],
+            "persona": n["persona"],
+            "final": final_p,
+        })
 
     if winner_id:
         w = next(n for n in negs if n["id"] == winner_id)
@@ -449,22 +615,32 @@ def run_negotiation(request_id: str, intake: dict, progress_cb=None) -> dict:
         })
         db.update_request_status(request_id, "completed")
 
-        minute_offset += 5
+        # Award message to the winner (in their conversation thread)
+        minute_offset += 6
         db.insert_message({
             "request_id": request_id, "negotiation_id": winner_id,
             "sender": "Centrica Procurement Agent",
-            "content": (
-                f"🏆 **CONTRACT AWARDED — PO {po_num} issued.**\n\n"
-                f"**Winner:** {sup['name']} ({PERSONAS[w['persona']]['label']})\n"
-                f"**Value:** £{w['agreed_price']:,.2f}\n"
-                f"**Payment:** {w['payment_terms']}\n"
-                f"**Delivery by:** {del_date}\n"
-                f"**Savings vs buyer budget:** £{savings:,.0f} ({savings_pct:.1f}%)\n\n"
-                f"Notifications sent to losing bidders. Thank you all for participating."
-            ),
+            "content": _award_winner_msg(sup["name"], w["agreed_price"], po_num, all_offers, savings, savings_pct),
             "message_type": "po",
             "timestamp": (base_dt + timedelta(minutes=minute_offset)).isoformat(),
         })
+
+        # Decline messages to losers (in each of their threads)
+        for neg in negs:
+            if neg["id"] == winner_id:
+                continue
+            minute_offset += 1
+            their_price = neg.get("agreed_price") if not neg.get("withdrawn") else None
+            if their_price is None and not neg.get("withdrawn"):
+                their_price = neg.get("current_offer")
+            db.insert_message({
+                "request_id": request_id, "negotiation_id": neg["id"],
+                "sender": "Centrica Procurement Agent",
+                "content": _decline_msg(neg["supplier_name"], w["agreed_price"], their_price, sup["name"]),
+                "message_type": "rejection",
+                "timestamp": (base_dt + timedelta(minutes=minute_offset)).isoformat(),
+            })
+
         result.update({
             "winner_supplier": sup["name"], "winner_supplier_type": sup["type"],
             "winner_persona": PERSONAS[w["persona"]]["label"],
