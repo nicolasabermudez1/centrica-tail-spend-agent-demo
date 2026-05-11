@@ -351,31 +351,32 @@ with tabs[-1]:
         else:
             final_str = f"£{neg.get('current_offer', 0):,.0f}"
 
-        rows_html += f"""
-        <tr class="{row_cls}">
-            <td><b>{neg['supplier_name']}</b></td>
-            <td>{persona_label}</td>
-            <td>{"Existing" if neg.get('supplier_type') == 'existing' else "Scouted"}</td>
-            <td>£{neg.get('initial_price', 0):,.0f}</td>
-            <td>{final_str}</td>
-            <td>{neg.get('payment_terms', '—')}</td>
-            <td>{neg.get('delivery_days', '—')} days</td>
-            <td>{verdict}</td>
-        </tr>
-        """
+        source_lbl = "Existing" if neg.get('supplier_type') == 'existing' else "Scouted"
+        rows_html += (
+            f'<tr class="{row_cls}">'
+            f'<td><b>{neg["supplier_name"]}</b></td>'
+            f'<td>{persona_label}</td>'
+            f'<td>{source_lbl}</td>'
+            f'<td>£{neg.get("initial_price", 0):,.0f}</td>'
+            f'<td>{final_str}</td>'
+            f'<td>{neg.get("payment_terms", "—")}</td>'
+            f'<td>{neg.get("delivery_days", "—")} days</td>'
+            f'<td>{verdict}</td>'
+            f'</tr>'
+        )
 
-    st.markdown(f"""
-    <table class="decision-table">
-        <thead>
-            <tr>
-                <th>Vendor</th><th>Persona</th><th>Source</th>
-                <th>Initial</th><th>Final</th>
-                <th>Payment</th><th>Delivery</th><th>Outcome</th>
-            </tr>
-        </thead>
-        <tbody>{rows_html}</tbody>
-    </table>
-    """, unsafe_allow_html=True)
+    table_html = (
+        '<table class="decision-table">'
+        '<thead><tr>'
+        '<th>Vendor</th><th>Persona</th><th>Source</th>'
+        '<th>Initial</th><th>Final</th>'
+        '<th>Payment</th><th>Delivery</th><th>Outcome</th>'
+        '</tr></thead>'
+        f'<tbody>{rows_html}</tbody>'
+        '</table>'
+    )
+    # Flat single-line HTML (no leading whitespace) so markdown doesn't treat it as a code block
+    st.markdown(table_html, unsafe_allow_html=True)
 
     st.markdown("")
 
