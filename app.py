@@ -11,6 +11,7 @@ except Exception:
     pass
 
 import uuid
+import time
 import streamlit as st
 from datetime import datetime
 from dotenv import load_dotenv
@@ -62,7 +63,7 @@ def _has_api_key() -> bool:
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Centrica | Tail-Spend Agent",
+    page_title="Business User View | Centrica",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -160,9 +161,9 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     st.markdown("---")
-    st.page_link("app.py", label="🛒  New Purchase Request", icon=None)
+    st.page_link("app.py", label="👤  Business User View", icon=None)
     st.page_link("pages/2_Live_Negotiation.py", label="🔄  Live Negotiation", icon=None)
-    st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Stakeholder Dashboard", icon=None)
+    st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Procurement View", icon=None)
     st.page_link("pages/4_Audit_Trail.py", label="🔍  Audit Trail", icon=None)
     st.markdown("---")
 
@@ -187,7 +188,7 @@ if "negotiation_result" not in st.session_state:
 # ── Header ─────────────────────────────────────────────────────────────────────
 col_h1, col_h2 = st.columns([3, 1])
 with col_h1:
-    st.markdown("## 🛒 New Purchase Request")
+    st.markdown("## 👤 Business User View")
     st.caption("Describe what you need and our agent will handle sourcing and negotiation automatically.")
 with col_h2:
     if st.button("🔄 Start New Request", use_container_width=True):
@@ -329,7 +330,7 @@ if st.session_state.buyer_name and not st.session_state.intake_complete:
         with col_a:
             st.caption("💡 Once you've shared the basics, click **Launch Sourcing Agent** to send RFQs to suppliers.")
 
-# ── Post-intake: show summary + run negotiation ────────────────────────────────
+# ── Post-intake: show summary + run negotiation (theatrical flow) ─────────────
 if st.session_state.intake_complete and st.session_state.intake_data:
     intake = st.session_state.intake_data
     request_id = st.session_state.request_id
@@ -347,48 +348,110 @@ if st.session_state.intake_complete and st.session_state.intake_data:
                     f"**Required by:** {intake.get('required_by', '—')}  |  "
                     f"**Priority:** {intake.get('priority', 'standard').title()}")
 
-    # Run negotiation
     if st.session_state.negotiation_result is None:
         st.markdown("---")
-        st.markdown("### 🤖 Agent Running — Sourcing & Negotiating")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
 
-        def progress_cb(msg, pct):
-            status_text.markdown(f"**{msg}**")
-            progress_bar.progress(pct)
+        # ── Stage 1: ~10 seconds of agent thinking ──────────────────────────
+        with st.status("🤖 **Sourcing Agent activating...**", expanded=True) as s1:
+            st.write(f"📋 Analyzing requirement: _{intake.get('description', '')[:80]}_")
+            time.sleep(2.0)
+            st.write(f"✓ Risk tier classified: **{(intake.get('risk_tier') or 'low').upper()}**")
+            time.sleep(1.5)
+            st.write(f"✓ Budget validated against MarketWatcher benchmarks: **£{intake.get('max_budget', 0):,.0f}**")
+            time.sleep(1.5)
+            st.write(f"✓ Category resolved: **{intake.get('category', '—')}**")
+            time.sleep(1.5)
+            st.write("🔍 Searching Centrica approved supplier database (Ariba master data)...")
+            time.sleep(2.5)
+            st.write("⚠️  Only **1 approved supplier** found for this category — insufficient for competitive tender")
+            time.sleep(1.0)
+            s1.update(label="✓ Initial supplier-database scan complete", state="complete", expanded=False)
 
+        # ── Popup 1: not enough vendors ─────────────────────────────────────
+        st.warning(
+            "📡 **MarketWatcher activated** — Only 1 approved Centrica supplier found for this category. "
+            "MarketWatcher has scouted **2 additional vendors** from the open market and added them to "
+            "the tender to ensure competitive pricing.",
+            icon="📡",
+        )
         try:
-            result = engine.run_negotiation(request_id, intake, progress_cb=progress_cb)
+            st.toast("📡 MarketWatcher: 2 new vendors added to the tender", icon="📡")
+        except Exception:
+            pass
+        time.sleep(2.5)
+
+        # ── Stage 2: ~10 seconds of negotiating (real run happens inside) ───
+        with st.status("🤝 **Negotiating in parallel with 3 suppliers...**", expanded=True) as s2:
+            st.write(f"📨 RFQ-{request_id[-4:]} dispatched to all 3 vendors with full technical specifications")
+            time.sleep(1.5)
+            st.write("📥 Vendor 1: initial quote received")
+            time.sleep(1.5)
+            st.write("📥 Vendor 2: initial quote received")
+            time.sleep(1.5)
+            st.write("📥 Vendor 3: initial quote received")
+            time.sleep(1.0)
+            try:
+                result = engine.run_negotiation(request_id, intake)
+            except Exception as e:
+                s2.update(label="❌ Negotiation failed", state="error")
+                st.error(f"Negotiation failed: {e}")
+                st.session_state.negotiation_result = {"escalated": True, "reason": str(e)}
+                st.stop()
             st.session_state.negotiation_result = result
             st.session_state.last_request_id = request_id
-            st.session_state.just_completed = True   # banner trigger for Live Negotiation page
-            if not result.get("escalated"):
-                # Auto-navigate to the Live Negotiation monitoring view
-                st.switch_page("pages/2_Live_Negotiation.py")
-            else:
-                st.rerun()
-        except Exception as e:
-            st.error(f"Negotiation failed: {e}")
-            st.session_state.negotiation_result = {"escalated": True, "reason": str(e)}
-            st.rerun()
-
-    # If we land here, negotiation result already exists. Show it + offer manual jump.
-    result = st.session_state.negotiation_result
-    st.markdown("---")
-
-    if result.get("escalated"):
-        st.error(f"⚠️ **Escalated to Category Manager** — {result.get('reason', 'High-risk request requires human review.')}")
-    else:
-        st.markdown("### 🎉 Deal Secured")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Awarded to", result.get("winner_supplier", "—"))
-        col2.metric("Agreed Price", f"£{result.get('agreed_price', 0):,.2f}")
-        col3.metric("Savings vs Budget", f"£{result.get('savings', 0):,.0f}", f"{result.get('savings_pct', 0):.1f}%")
-        col4.metric("PO Number", result.get("po_number", "—"))
-
-        st.info(f"📄 Purchase order **{result.get('po_number')}** issued. Delivery by **{result.get('delivery_date', '—')}**.")
-        if st.button("📺 View Live Negotiation →", type="primary"):
-            st.session_state.last_request_id = st.session_state.get("request_id")
             st.session_state.just_completed = True
+
+            st.write("💬 Round 1: commercial analysis prepared and counter-offers issued")
+            time.sleep(1.5)
+            st.write("💬 Round 2: vendor responses received and evaluated")
+            time.sleep(1.5)
+            if not result.get("escalated"):
+                st.write(f"🏆 Cheapest accepted bid: **{result['winner_supplier']}** at **£{result['agreed_price']:,.0f}**")
+                time.sleep(1.0)
+                st.write(f"📄 Purchase Order **{result['po_number']}** issued to winning supplier")
+                time.sleep(1.0)
+                s2.update(label="✓ Procurement complete", state="complete", expanded=False)
+            else:
+                s2.update(label="⚠️ Escalated — no agreement reached", state="error", expanded=False)
+
+        # ── Popup 2: procured + email confirmation ──────────────────────────
+        if not result.get("escalated"):
+            product = intake.get("description", "Item")
+            short_product = product if len(product) <= 70 else product[:67] + "..."
+            buyer_dept = st.session_state.get("buyer_dept") or intake.get("buyer_department", "Procurement")
+            st.success(
+                f"✅ **{short_product} — Procured.**  \n\n"
+                f"Purchase Order **{result['po_number']}** issued to **{result['winner_supplier']}** "
+                f"at £{result['agreed_price']:,.0f} (saving £{result['savings']:,.0f}).  \n\n"
+                f"📧 **Please review your email confirmation** — sent to your inbox ({buyer_dept}).",
+                icon="✅",
+            )
+            try:
+                st.toast(f"✅ {short_product[:40]}... procured — see email confirmation", icon="📧")
+            except Exception:
+                pass
+            time.sleep(3.5)
             st.switch_page("pages/2_Live_Negotiation.py")
+        else:
+            st.error(f"⚠️ **Escalated to Category Manager** — {result.get('reason', 'No agreement reached.')}")
+            st.stop()
+
+    # If the user navigates back to this page after a deal has already completed,
+    # show the summary with a button to return to Live Negotiation.
+    else:
+        result = st.session_state.negotiation_result
+        st.markdown("---")
+        if result.get("escalated"):
+            st.error(f"⚠️ **Escalated** — {result.get('reason', 'High-risk request.')}")
+        else:
+            st.markdown("### 🎉 Deal Secured")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Awarded to", result.get("winner_supplier", "—"))
+            col2.metric("Agreed Price", f"£{result.get('agreed_price', 0):,.2f}")
+            col3.metric("Savings vs Budget", f"£{result.get('savings', 0):,.0f}", f"{result.get('savings_pct', 0):.1f}%")
+            col4.metric("PO Number", result.get("po_number", "—"))
+            st.info(f"📄 PO **{result.get('po_number')}** issued. Delivery by **{result.get('delivery_date', '—')}**.")
+            if st.button("📺 View Live Negotiation →", type="primary"):
+                st.session_state.last_request_id = st.session_state.get("request_id")
+                st.session_state.just_completed = True
+                st.switch_page("pages/2_Live_Negotiation.py")

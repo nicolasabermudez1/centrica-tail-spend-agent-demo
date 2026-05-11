@@ -73,9 +73,9 @@ if not db.db_has_demo_data():
 with st.sidebar:
     st.markdown('<div class="logo-text">⚡ Centrica</div><div class="logo-sub">TAIL-SPEND AGENT</div>', unsafe_allow_html=True)
     st.markdown("---")
-    st.page_link("app.py", label="🛒  New Purchase Request")
+    st.page_link("app.py", label="👤  Business User View")
     st.page_link("pages/2_Live_Negotiation.py", label="🔄  Live Negotiation")
-    st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Stakeholder Dashboard")
+    st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Procurement View")
     st.page_link("pages/4_Audit_Trail.py", label="🔍  Audit Trail")
     st.markdown("---")
 
@@ -85,7 +85,7 @@ st.caption("Full conversation and negotiation log for compliance, review, and Ca
 # ── Request selector ───────────────────────────────────────────────────────────
 all_requests = db.get_all_requests()
 if not all_requests:
-    st.info("No requests to audit yet. Start a new request from the Buyer Intake page.")
+    st.info("No requests to audit yet. Start a new request from the Business User View page.")
     st.stop()
 
 col_sel, col_filter = st.columns([3, 1])
@@ -180,10 +180,10 @@ def render_messages(messages, show_sender=True):
 
 
 # ── Tab layout: intake | per-supplier | all messages ──────────────────────────
-tab1, tab2, tab3 = st.tabs(["💬 Buyer Intake", "🏢 Supplier Negotiations", "📜 Full Log"])
+tab1, tab2, tab3 = st.tabs(["💬 Business User Chat", "🏢 Supplier Negotiations", "📜 Full Log"])
 
 with tab1:
-    st.markdown('<div class="section-header">Buyer Intake Conversation</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Business User Chat</div>', unsafe_allow_html=True)
     intake_msgs = [m for m in db.get_messages_for_request(request_id) if not m.get("negotiation_id")]
     if intake_msgs:
         render_messages(intake_msgs)

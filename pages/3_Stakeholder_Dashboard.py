@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import database as db
 from demo_data import seed_demo_data
 
-st.set_page_config(page_title="Stakeholder Dashboard | Centrica", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Procurement View | Centrica", page_icon="📊", layout="wide")
 
 # ── Brand CSS ──────────────────────────────────────────────────────────────────
 NAVY   = "#0F2067"
@@ -64,9 +64,9 @@ if not db.db_has_demo_data():
 with st.sidebar:
     st.markdown('<div class="logo-text">⚡ Centrica</div><div class="logo-sub">TAIL-SPEND AGENT</div>', unsafe_allow_html=True)
     st.markdown("---")
-    st.page_link("app.py", label="🛒  New Purchase Request")
+    st.page_link("app.py", label="👤  Business User View")
     st.page_link("pages/2_Live_Negotiation.py", label="🔄  Live Negotiation")
-    st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Stakeholder Dashboard")
+    st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Procurement View")
     st.page_link("pages/4_Audit_Trail.py", label="🔍  Audit Trail")
     st.markdown("---")
 
@@ -78,7 +78,7 @@ all_requests = db.get_all_requests()
 # ── Header ─────────────────────────────────────────────────────────────────────
 col_h1, col_h2 = st.columns([3, 1])
 with col_h1:
-    st.markdown("## 📊 Stakeholder Dashboard")
+    st.markdown("## 📊 Procurement View")
     st.caption("Real-time view of all Tail-Spend Agent activity — spend, savings, and negotiation outcomes.")
 with col_h2:
     if st.button("🔄 Refresh", use_container_width=True):

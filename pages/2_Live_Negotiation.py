@@ -116,9 +116,9 @@ if not db.db_has_demo_data():
 with st.sidebar:
     st.markdown('<div class="logo-text">⚡ Centrica</div><div class="logo-sub">TAIL-SPEND AGENT</div>', unsafe_allow_html=True)
     st.markdown("---")
-    st.page_link("app.py", label="🛒  New Purchase Request")
+    st.page_link("app.py", label="👤  Business User View")
     st.page_link("pages/2_Live_Negotiation.py", label="🔄  Live Negotiation")
-    st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Stakeholder Dashboard")
+    st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Procurement View")
     st.page_link("pages/4_Audit_Trail.py", label="🔍  Audit Trail")
     st.markdown("---")
 
@@ -153,7 +153,7 @@ if st.session_state.get("just_completed") and st.session_state.get("negotiation_
 # ── Request selector ───────────────────────────────────────────────────────────
 all_requests = db.get_all_requests()
 if not all_requests:
-    st.info("No requests yet. Go to **New Purchase Request** to start one.")
+    st.info("No requests yet. Go to **Business User View** to start one.")
     st.stop()
 
 request_options = {
