@@ -19,9 +19,35 @@ import os
 load_dotenv()
 
 import database as db
-from intake_bot import chat_stream, extract_intake_json
+from intake_bot import chat_stream, extract_intake_json, force_extract_intake
 import negotiation_engine as engine
 from demo_data import seed_demo_data
+
+
+def _commit_intake(intake_json: dict) -> None:
+    """Persist the extracted intake JSON to DB and mark session as intake-complete."""
+    intake_json.setdefault("buyer_name", st.session_state.buyer_name)
+    intake_json.setdefault("buyer_department", st.session_state.get("buyer_dept", "Operations"))
+    st.session_state.intake_data = intake_json
+    st.session_state.intake_complete = True
+    req_id = f"req-live-{uuid.uuid4().hex[:8]}"
+    st.session_state.request_id = req_id
+    now = datetime.utcnow().isoformat()
+    db.insert_request({
+        **intake_json,
+        "id": req_id,
+        "status": "intake",
+        "created_at": now,
+        "updated_at": now,
+    })
+    for m in st.session_state.messages:
+        db.insert_message({
+            "request_id": req_id,
+            "sender": "buyer" if m["role"] == "user" else "bot",
+            "content": m["content"].split("INTAKE_COMPLETE:")[0].strip(),
+            "message_type": "chat",
+            "timestamp": now,
+        })
 
 
 def _has_api_key() -> bool:
@@ -262,33 +288,46 @@ if st.session_state.buyer_name and not st.session_state.intake_complete:
 
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-        # Check if intake is complete
+        # Check if intake is complete via inline marker
         intake_json = extract_intake_json(response)
         if intake_json:
-            st.session_state.intake_data = intake_json
-            st.session_state.intake_complete = True
-            req_id = f"req-live-{uuid.uuid4().hex[:8]}"
-            st.session_state.request_id = req_id
-            now = datetime.utcnow().isoformat()
-            intake_json.setdefault("buyer_name", st.session_state.buyer_name)
-            db.insert_request({
-                **intake_json,
-                "id": req_id,
-                "status": "intake",
-                "created_at": now,
-                "updated_at": now,
-            })
-            # Save intake messages to DB
-            for m in st.session_state.messages:
-                db.insert_message({
-                    "request_id": req_id,
-                    "sender": "buyer" if m["role"] == "user" else "bot",
-                    "content": m["content"].split("INTAKE_COMPLETE:")[0].strip(),
-                    "message_type": "chat",
-                    "timestamp": now,
-                })
+            _commit_intake(intake_json)
 
         st.rerun()
+
+    # ── Manual launch button (fallback if bot doesn't emit INTAKE_COMPLETE) ────
+    user_turns = sum(1 for m in st.session_state.messages if m["role"] == "user")
+    if user_turns >= 2 and not st.session_state.intake_complete:
+        st.markdown("")
+        col_a, col_b = st.columns([3, 1])
+        with col_b:
+            if st.button("🚀 Launch Sourcing Agent", type="primary", use_container_width=True):
+                with st.spinner("Extracting requirement..."):
+                    if _has_api_key():
+                        intake_json = force_extract_intake(
+                            st.session_state.messages,
+                            buyer_name=st.session_state.buyer_name,
+                            buyer_dept=st.session_state.get("buyer_dept", ""),
+                        )
+                    else:
+                        # Demo-mode fallback
+                        intake_json = {
+                            "buyer_name": st.session_state.buyer_name,
+                            "buyer_department": st.session_state.get("buyer_dept", "Operations"),
+                            "business_unit": "British Gas Services",
+                            "category": "IT Equipment & Software",
+                            "subcategory": "—",
+                            "description": next((m["content"] for m in st.session_state.messages if m["role"] == "user"), "Procurement request"),
+                            "quantity": 10, "unit": "units", "max_budget": 25000,
+                            "required_by": "2026-07-01", "priority": "standard", "risk_tier": "low",
+                        }
+                    if intake_json:
+                        _commit_intake(intake_json)
+                        st.rerun()
+                    else:
+                        st.error("Could not extract a structured request from the conversation. Please add a bit more detail and try again.")
+        with col_a:
+            st.caption("💡 Once you've shared the basics, click **Launch Sourcing Agent** to send RFQs to suppliers.")
 
 # ── Post-intake: show summary + run negotiation ────────────────────────────────
 if st.session_state.intake_complete and st.session_state.intake_data:
@@ -322,13 +361,19 @@ if st.session_state.intake_complete and st.session_state.intake_data:
         try:
             result = engine.run_negotiation(request_id, intake, progress_cb=progress_cb)
             st.session_state.negotiation_result = result
-            st.rerun()
+            st.session_state.last_request_id = request_id
+            st.session_state.just_completed = True   # banner trigger for Live Negotiation page
+            if not result.get("escalated"):
+                # Auto-navigate to the Live Negotiation monitoring view
+                st.switch_page("pages/2_Live_Negotiation.py")
+            else:
+                st.rerun()
         except Exception as e:
             st.error(f"Negotiation failed: {e}")
             st.session_state.negotiation_result = {"escalated": True, "reason": str(e)}
             st.rerun()
 
-    # Show result
+    # If we land here, negotiation result already exists. Show it + offer manual jump.
     result = st.session_state.negotiation_result
     st.markdown("---")
 
@@ -343,4 +388,7 @@ if st.session_state.intake_complete and st.session_state.intake_data:
         col4.metric("PO Number", result.get("po_number", "—"))
 
         st.info(f"📄 Purchase order **{result.get('po_number')}** issued. Delivery by **{result.get('delivery_date', '—')}**.")
-        st.markdown("➡️ View full negotiation transcript in [🔄 Live Negotiation](pages/2_Live_Negotiation.py) or [🔍 Audit Trail](pages/4_Audit_Trail.py)")
+        if st.button("📺 View Live Negotiation →", type="primary"):
+            st.session_state.last_request_id = st.session_state.get("request_id")
+            st.session_state.just_completed = True
+            st.switch_page("pages/2_Live_Negotiation.py")

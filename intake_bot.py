@@ -118,6 +118,53 @@ def extract_intake_json(full_response: str) -> dict | None:
         return None
 
 
+def force_extract_intake(messages: list, buyer_name: str = "", buyer_dept: str = "") -> dict | None:
+    """
+    Fallback: send the full conversation to Gemini and force a structured JSON
+    extraction. Used when the assistant's inline INTAKE_COMPLETE marker isn't
+    detected or the user clicks "Launch Sourcing Agent" manually.
+    """
+    client = _get_client()
+    model = os.getenv("GEMINI_MODEL_FAST", "gemini-2.0-flash")
+
+    transcript = "\n".join(
+        f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+        for m in messages
+    )
+
+    prompt = (
+        "You are extracting a structured procurement request from a buyer–assistant conversation. "
+        "Read the transcript below and produce a JSON object with EXACTLY these keys:\n\n"
+        "  buyer_name, buyer_department, business_unit, category, subcategory, "
+        "description, quantity (int), unit, max_budget (number, GBP), "
+        "required_by (YYYY-MM-DD), priority ('standard'|'urgent'), risk_tier ('low'|'medium'|'high').\n\n"
+        "Rules:\n"
+        "- category MUST be one of: IT Equipment & Software, Facilities Management, Professional Services, "
+        "Fleet & Transport, Engineering & Maintenance, Office Supplies & Furniture, "
+        "Health & Safety Equipment, Marketing & Communications, Other.\n"
+        "- risk_tier: LOW if budget < £50k routine; MEDIUM if £50k–£200k or IT/data; HIGH if >£200k or critical infra.\n"
+        "- Use best inference for any field not explicitly stated.\n"
+        "- If buyer_name is missing, use '" + (buyer_name or "Unknown Buyer") + "'.\n"
+        "- If buyer_department is missing, use '" + (buyer_dept or "Operations") + "'.\n\n"
+        "TRANSCRIPT:\n" + transcript + "\n\n"
+        "Return ONLY the JSON object, nothing else."
+    )
+
+    resp = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=0,
+            max_output_tokens=400,
+            response_mime_type="application/json",
+        ),
+    )
+    try:
+        return json.loads(resp.text)
+    except Exception:
+        return None
+
+
 def classify_category(description: str) -> str:
     """Quick Gemini call to classify a free-text description into a procurement category."""
     client = _get_client()

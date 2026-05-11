@@ -113,6 +113,32 @@ with st.sidebar:
 st.markdown("## 🔄 Live Negotiation")
 st.caption("4-agent negotiation conversation: Centrica Procurement Agent vs. 3 vendors with distinct strategies.")
 
+# ── Celebration banner if the user just completed a request ──────────────────
+if st.session_state.get("just_completed") and st.session_state.get("negotiation_result"):
+    result = st.session_state.negotiation_result
+    if not result.get("escalated"):
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg,#0F2067,#9B2BF7);
+                    color: white; padding: 1.2rem 1.5rem; border-radius: 14px;
+                    margin-bottom: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.12);">
+            <div style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px;">
+                🎉 Deal secured — {result.get('po_number', 'PO issued')}
+            </div>
+            <div style="font-size: 0.95rem; opacity: 0.95;">
+                Awarded to <b>{result.get('winner_supplier', '—')}</b> at
+                <b>£{result.get('agreed_price', 0):,.2f}</b> ·
+                Savings <b>£{result.get('savings', 0):,.0f}</b>
+                ({result.get('savings_pct', 0):.1f}%) ·
+                Delivery by <b>{result.get('delivery_date', '—')}</b>
+            </div>
+            <div style="font-size: 0.85rem; opacity: 0.85; margin-top: 8px;">
+                Below is the full 4-agent negotiation conversation that produced this outcome.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    # Clear the flag so it doesn't show again on subsequent visits
+    st.session_state.just_completed = False
+
 # ── Request selector ───────────────────────────────────────────────────────────
 all_requests = db.get_all_requests()
 if not all_requests:
@@ -123,7 +149,17 @@ request_options = {
     f"{r['id']} — {r['category']} ({r['status'].title()}) · {r['buyer_name']}": r["id"]
     for r in all_requests
 }
-selected_label = st.selectbox("Select request", list(request_options.keys()), index=0)
+
+# Pre-select the just-created request if available
+default_index = 0
+preferred_id = st.session_state.get("last_request_id")
+if preferred_id:
+    for i, (_, rid) in enumerate(request_options.items()):
+        if rid == preferred_id:
+            default_index = i
+            break
+
+selected_label = st.selectbox("Select request", list(request_options.keys()), index=default_index)
 request_id = request_options[selected_label]
 request = db.get_request(request_id)
 negotiations = db.get_negotiations_for_request(request_id)
