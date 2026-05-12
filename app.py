@@ -351,6 +351,78 @@ if st.session_state.intake_complete and st.session_state.intake_data:
     if st.session_state.negotiation_result is None:
         st.markdown("---")
 
+        TAIL_SPEND_THRESHOLD = 25000
+        budget = float(intake.get('max_budget', 0) or 0)
+
+        # ── HARD GATE: budget above tail-spend threshold = escalate, no PO ──
+        if budget > TAIL_SPEND_THRESHOLD:
+            with st.status("🤖 **Sourcing Agent activating...**", expanded=True) as s_gate:
+                st.write(f"📋 Analyzing requirement: _{intake.get('description', '')[:80]}_")
+                time.sleep(1.5)
+                st.write(f"✓ Risk tier classified: **{(intake.get('risk_tier') or 'low').upper()}**")
+                time.sleep(1.2)
+                st.write(f"✓ Budget read: **£{budget:,.0f}**")
+                time.sleep(1.2)
+                st.write(f"🔍 Comparing budget to tail-spend autonomy threshold (**£{TAIL_SPEND_THRESHOLD:,}**)...")
+                time.sleep(2.0)
+                st.write(f"⛔ **Budget exceeds threshold by £{budget - TAIL_SPEND_THRESHOLD:,.0f}**")
+                time.sleep(1.0)
+                st.write("📨 Routing to Category Manager queue...")
+                time.sleep(1.5)
+                s_gate.update(label="⚠️ Escalated — outside autonomous procurement scope", state="error", expanded=False)
+
+            # Mark request as escalated in DB
+            db.update_request_status(request_id, "escalated")
+            reason = (
+                f"Order budget of £{budget:,.0f} exceeds the £{TAIL_SPEND_THRESHOLD:,} "
+                f"tail-spend autonomous-procurement threshold. Complexity too high — "
+                f"flagged to Category Manager for manual review and approval."
+            )
+            st.session_state.negotiation_result = {"escalated": True, "reason": reason}
+            st.session_state.last_request_id = request_id
+
+            # Prominent escalation banner
+            st.markdown(
+                '<div style="background:linear-gradient(135deg,#F59E0B 0%,#DC2626 100%);'
+                'color:white;padding:2.2rem 2rem;border-radius:18px;'
+                'box-shadow:0 6px 22px rgba(220,38,38,0.28);text-align:center;'
+                'margin:1.5rem 0;border:3px solid #DC2626;">'
+                '<div style="font-size:0.85rem;font-weight:700;letter-spacing:0.16em;'
+                'text-transform:uppercase;opacity:0.95;margin-bottom:10px;">'
+                '⚠️  Escalated &middot; Complexity Too High</div>'
+                f'<div style="font-size:2.6rem;font-weight:900;line-height:1.1;'
+                'margin:8px 0 14px 0;">Flagged to Category Manager</div>'
+                f'<div style="font-size:1rem;opacity:0.97;">Budget '
+                f'<b>£{budget:,.0f}</b> exceeds the <b>£{TAIL_SPEND_THRESHOLD:,}</b> '
+                f'tail-spend autonomy threshold by £{budget - TAIL_SPEND_THRESHOLD:,.0f}.</div>'
+                '<div style="font-size:0.9rem;opacity:0.93;margin-top:14px;'
+                'padding-top:12px;border-top:1px solid rgba(255,255,255,0.3);">'
+                'No RFQs dispatched. No PO issued. '
+                'A Category Manager will review this request and contact you within 2 business days.'
+                '</div></div>',
+                unsafe_allow_html=True,
+            )
+
+            try:
+                st.toast("⚠️ Escalated to Category Manager — over £25K", icon="⚠️")
+            except Exception:
+                pass
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("🔄 Start a different request", use_container_width=True):
+                    st.session_state.messages = []
+                    st.session_state.intake_complete = False
+                    st.session_state.intake_data = None
+                    st.session_state.request_id = None
+                    st.session_state.negotiation_result = None
+                    st.rerun()
+            with col_b:
+                if st.button("🔍 Open Audit Trail", use_container_width=True):
+                    st.session_state.last_request_id = request_id
+                    st.switch_page("pages/4_Audit_Trail.py")
+            st.stop()
+
         # ── Stage 1: ~10 seconds of agent thinking ──────────────────────────
         with st.status("🤖 **Sourcing Agent activating...**", expanded=True) as s1:
             st.write(f"📋 Analyzing requirement: _{intake.get('description', '')[:80]}_")
@@ -359,6 +431,8 @@ if st.session_state.intake_complete and st.session_state.intake_data:
             time.sleep(1.5)
             st.write(f"✓ Budget validated against MarketWatcher benchmarks: **£{intake.get('max_budget', 0):,.0f}**")
             time.sleep(1.5)
+            st.write(f"✓ Budget within £{TAIL_SPEND_THRESHOLD:,} tail-spend autonomy threshold")
+            time.sleep(1.2)
             st.write(f"✓ Category resolved: **{intake.get('category', '—')}**")
             time.sleep(1.5)
             st.write("🔍 Searching Centrica approved supplier database (Ariba master data)...")
