@@ -64,8 +64,11 @@ if not db.db_has_demo_data():
 with st.sidebar:
     st.markdown('<div class="logo-text">⚡ Centrica</div><div class="logo-sub">TAIL-SPEND AGENT</div>', unsafe_allow_html=True)
     st.markdown("---")
+    _neg_locked = st.session_state.get("negotiation_locked", False)
     st.page_link("app.py", label="👤  Business User View")
-    st.page_link("pages/2_Live_Negotiation.py", label="🔄  Live Negotiation")
+    st.page_link("pages/2_Live_Negotiation.py",
+                 label="🔒  Live Negotiation (locked)" if _neg_locked else "🔄  Live Negotiation",
+                 disabled=_neg_locked)
     st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Procurement View")
     st.page_link("pages/4_Audit_Trail.py", label="🔍  Audit Trail")
     st.markdown("---")

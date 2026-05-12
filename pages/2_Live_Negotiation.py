@@ -116,14 +116,45 @@ if not db.db_has_demo_data():
 with st.sidebar:
     st.markdown('<div class="logo-text">⚡ Centrica</div><div class="logo-sub">TAIL-SPEND AGENT</div>', unsafe_allow_html=True)
     st.markdown("---")
+    _neg_locked = st.session_state.get("negotiation_locked", False)
     st.page_link("app.py", label="👤  Business User View")
-    st.page_link("pages/2_Live_Negotiation.py", label="🔄  Live Negotiation")
+    st.page_link("pages/2_Live_Negotiation.py",
+                 label="🔒  Live Negotiation (locked)" if _neg_locked else "🔄  Live Negotiation",
+                 disabled=_neg_locked)
     st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Procurement View")
     st.page_link("pages/4_Audit_Trail.py", label="🔍  Audit Trail")
     st.markdown("---")
 
 st.markdown("## 🔄 Live Negotiation")
 st.caption("The Sourcing Agent runs a separate, structured negotiation with each vendor — pick a tab to follow each conversation.")
+
+# ── Defence: if the current session has an escalated request, lock this page ──
+if st.session_state.get("negotiation_locked"):
+    budget = float(st.session_state.get("escalated_budget", 0) or 0)
+    TAIL_SPEND_THRESHOLD = 25000
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#F59E0B 0%,#DC2626 100%);'
+        'color:white;padding:2.2rem 2rem;border-radius:18px;'
+        'box-shadow:0 6px 22px rgba(220,38,38,0.28);text-align:center;'
+        'margin:1.5rem 0;border:3px solid #DC2626;">'
+        '<div style="font-size:0.85rem;font-weight:700;letter-spacing:0.16em;'
+        'text-transform:uppercase;opacity:0.95;margin-bottom:10px;">'
+        '🔒 Live Negotiation Locked &middot; Escalated</div>'
+        '<div style="font-size:2.2rem;font-weight:900;line-height:1.1;'
+        'margin:8px 0 14px 0;">No autonomous negotiation for this request</div>'
+        f'<div style="font-size:1rem;opacity:0.97;">Budget '
+        f'<b>£{budget:,.0f}</b> exceeds the <b>£{TAIL_SPEND_THRESHOLD:,}</b> '
+        f'tail-spend autonomy threshold &mdash; flagged to Category Manager.</div>'
+        '<div style="font-size:0.9rem;opacity:0.93;margin-top:14px;'
+        'padding-top:12px;border-top:1px solid rgba(255,255,255,0.3);">'
+        'No RFQs were dispatched. No PO was issued. '
+        'Return to <b>Business User View</b> to start a new request and unlock this tab.'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("👤 Return to Business User View", type="primary"):
+        st.switch_page("app.py")
+    st.stop()
 
 # ── Celebration banner if user just completed a request ──────────────────────
 if st.session_state.get("just_completed") and st.session_state.get("negotiation_result"):

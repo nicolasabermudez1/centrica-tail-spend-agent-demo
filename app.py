@@ -161,8 +161,11 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     st.markdown("---")
+    _neg_locked = st.session_state.get("negotiation_locked", False)
     st.page_link("app.py", label="👤  Business User View", icon=None)
-    st.page_link("pages/2_Live_Negotiation.py", label="🔄  Live Negotiation", icon=None)
+    st.page_link("pages/2_Live_Negotiation.py",
+                 label="🔒  Live Negotiation (locked)" if _neg_locked else "🔄  Live Negotiation",
+                 disabled=_neg_locked, icon=None)
     st.page_link("pages/3_Stakeholder_Dashboard.py", label="📊  Procurement View", icon=None)
     st.page_link("pages/4_Audit_Trail.py", label="🔍  Audit Trail", icon=None)
     st.markdown("---")
@@ -197,6 +200,8 @@ with col_h2:
         st.session_state.intake_data = None
         st.session_state.request_id = None
         st.session_state.negotiation_result = None
+        st.session_state.negotiation_locked = False
+        st.session_state.escalated_request_id = None
         st.rerun()
 
 # ── Buyer name input (only at start) ──────────────────────────────────────────
@@ -380,48 +385,12 @@ if st.session_state.intake_complete and st.session_state.intake_data:
             )
             st.session_state.negotiation_result = {"escalated": True, "reason": reason}
             st.session_state.last_request_id = request_id
-
-            # Prominent escalation banner
-            st.markdown(
-                '<div style="background:linear-gradient(135deg,#F59E0B 0%,#DC2626 100%);'
-                'color:white;padding:2.2rem 2rem;border-radius:18px;'
-                'box-shadow:0 6px 22px rgba(220,38,38,0.28);text-align:center;'
-                'margin:1.5rem 0;border:3px solid #DC2626;">'
-                '<div style="font-size:0.85rem;font-weight:700;letter-spacing:0.16em;'
-                'text-transform:uppercase;opacity:0.95;margin-bottom:10px;">'
-                '⚠️  Escalated &middot; Complexity Too High</div>'
-                f'<div style="font-size:2.6rem;font-weight:900;line-height:1.1;'
-                'margin:8px 0 14px 0;">Flagged to Category Manager</div>'
-                f'<div style="font-size:1rem;opacity:0.97;">Budget '
-                f'<b>£{budget:,.0f}</b> exceeds the <b>£{TAIL_SPEND_THRESHOLD:,}</b> '
-                f'tail-spend autonomy threshold by £{budget - TAIL_SPEND_THRESHOLD:,.0f}.</div>'
-                '<div style="font-size:0.9rem;opacity:0.93;margin-top:14px;'
-                'padding-top:12px;border-top:1px solid rgba(255,255,255,0.3);">'
-                'No RFQs dispatched. No PO issued. '
-                'A Category Manager will review this request and contact you within 2 business days.'
-                '</div></div>',
-                unsafe_allow_html=True,
-            )
-
-            try:
-                st.toast("⚠️ Escalated to Category Manager — over £25K", icon="⚠️")
-            except Exception:
-                pass
-
-            col_a, col_b = st.columns(2)
-            with col_a:
-                if st.button("🔄 Start a different request", use_container_width=True):
-                    st.session_state.messages = []
-                    st.session_state.intake_complete = False
-                    st.session_state.intake_data = None
-                    st.session_state.request_id = None
-                    st.session_state.negotiation_result = None
-                    st.rerun()
-            with col_b:
-                if st.button("🔍 Open Audit Trail", use_container_width=True):
-                    st.session_state.last_request_id = request_id
-                    st.switch_page("pages/4_Audit_Trail.py")
-            st.stop()
+            # LOCK: prevent access to Live Negotiation tab while user has an escalated request
+            st.session_state.negotiation_locked = True
+            st.session_state.escalated_request_id = request_id
+            st.session_state.escalated_budget = budget
+            st.session_state.escalated_reason = reason
+            st.rerun()
 
         # ── Stage 1: ~10 seconds of agent thinking ──────────────────────────
         with st.status("🤖 **Sourcing Agent activating...**", expanded=True) as s1:
@@ -542,13 +511,51 @@ if st.session_state.intake_complete and st.session_state.intake_data:
             st.error(f"⚠️ **Escalated to Category Manager** — {result.get('reason', 'No agreement reached.')}")
             st.stop()
 
-    # If the user navigates back to this page after a deal has already completed,
-    # show the summary with a button to return to Live Negotiation.
+    # ── Persistent state: negotiation already ran (escalated OR completed) ────
     else:
         result = st.session_state.negotiation_result
         st.markdown("---")
         if result.get("escalated"):
-            st.error(f"⚠️ **Escalated** — {result.get('reason', 'High-risk request.')}")
+            # Persistent amber/red escalation banner — stays on screen across reruns
+            budget = float(st.session_state.get("escalated_budget", intake.get("max_budget", 0) or 0))
+            TAIL_SPEND_THRESHOLD = 25000
+            st.markdown(
+                '<div style="background:linear-gradient(135deg,#F59E0B 0%,#DC2626 100%);'
+                'color:white;padding:2.2rem 2rem;border-radius:18px;'
+                'box-shadow:0 6px 22px rgba(220,38,38,0.28);text-align:center;'
+                'margin:1.5rem 0;border:3px solid #DC2626;">'
+                '<div style="font-size:0.85rem;font-weight:700;letter-spacing:0.16em;'
+                'text-transform:uppercase;opacity:0.95;margin-bottom:10px;">'
+                '⚠️  Escalated &middot; Complexity Too High</div>'
+                '<div style="font-size:2.6rem;font-weight:900;line-height:1.1;'
+                'margin:8px 0 14px 0;">Flagged to Category Manager</div>'
+                f'<div style="font-size:1rem;opacity:0.97;">Budget '
+                f'<b>£{budget:,.0f}</b> exceeds the <b>£{TAIL_SPEND_THRESHOLD:,}</b> '
+                f'tail-spend autonomy threshold by £{max(budget - TAIL_SPEND_THRESHOLD, 0):,.0f}.</div>'
+                '<div style="font-size:0.9rem;opacity:0.93;margin-top:14px;'
+                'padding-top:12px;border-top:1px solid rgba(255,255,255,0.3);">'
+                'No RFQs dispatched. No PO issued. '
+                'A Category Manager will review this request and contact you within 2 business days.'
+                '<br><br>🔒 <b>The Live Negotiation tab is locked</b> for this request — start a new request to unlock.'
+                '</div></div>',
+                unsafe_allow_html=True,
+            )
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("🔄 Start a different request", use_container_width=True, type="primary"):
+                    st.session_state.messages = []
+                    st.session_state.intake_complete = False
+                    st.session_state.intake_data = None
+                    st.session_state.request_id = None
+                    st.session_state.negotiation_result = None
+                    st.session_state.negotiation_locked = False
+                    st.session_state.escalated_request_id = None
+                    st.rerun()
+            with col_b:
+                if st.button("🔍 Open Audit Trail", use_container_width=True):
+                    st.session_state.last_request_id = st.session_state.get("escalated_request_id") or request_id
+                    st.switch_page("pages/4_Audit_Trail.py")
         else:
             st.markdown("### 🎉 Deal Secured")
             col1, col2, col3, col4 = st.columns(4)
