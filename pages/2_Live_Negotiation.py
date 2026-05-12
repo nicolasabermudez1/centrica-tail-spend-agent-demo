@@ -129,25 +129,51 @@ st.caption("The Sourcing Agent runs a separate, structured negotiation with each
 if st.session_state.get("just_completed") and st.session_state.get("negotiation_result"):
     result = st.session_state.negotiation_result
     if not result.get("escalated"):
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg,#0F2067,#9B2BF7);
-                    color: white; padding: 1.2rem 1.5rem; border-radius: 14px;
-                    margin-bottom: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.12);">
-            <div style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px;">
-                🎉 Deal secured — {result.get('po_number', 'PO issued')}
+        TAIL_SPEND_THRESHOLD = 25000
+        po_num = result.get('po_number', 'PO issued')
+        final_price = result.get('agreed_price', 0)
+        winner = result.get('winner_supplier', '—')
+        savings = result.get('savings', 0)
+        delivery = result.get('delivery_date', '—')
+        is_tail_spend = final_price < TAIL_SPEND_THRESHOLD
+
+        if is_tail_spend:
+            # Prominent mint-green PO# banner — tail-spend auto-approved
+            st.markdown(
+                '<div style="background:linear-gradient(135deg,#85DB9C 0%,#16A34A 100%);'
+                'color:white;padding:1.8rem 1.8rem;border-radius:16px;'
+                'box-shadow:0 4px 18px rgba(22,163,74,0.25);text-align:center;'
+                'margin-bottom:1rem;border:3px solid #16A34A;">'
+                '<div style="font-size:0.8rem;font-weight:700;letter-spacing:0.16em;'
+                'text-transform:uppercase;opacity:0.95;margin-bottom:8px;">'
+                '✓ Purchase Order Placed &middot; Tail-Spend Auto-Approved</div>'
+                f'<div style="font-size:2.4rem;font-weight:900;line-height:1.1;'
+                'font-family:\'Courier New\',monospace;letter-spacing:0.04em;'
+                f'margin:4px 0 10px 0;">{po_num}</div>'
+                f'<div style="font-size:0.95rem;opacity:0.97;">Awarded to <b>{winner}</b> &middot; '
+                f'<b>£{final_price:,.0f}</b> &middot; Saved <b>£{savings:,.0f}</b> &middot; '
+                f'Delivery by <b>{delivery}</b></div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg,#0F2067,#9B2BF7);
+                        color: white; padding: 1.2rem 1.5rem; border-radius: 14px;
+                        margin-bottom: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.12);">
+                <div style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px;">
+                    🎉 Deal secured — {po_num}
+                </div>
+                <div style="font-size: 0.95rem; opacity: 0.95;">
+                    Awarded to <b>{winner}</b> at <b>£{final_price:,.2f}</b> ·
+                    Savings <b>£{savings:,.0f}</b> ({result.get('savings_pct', 0):.1f}%) ·
+                    Delivery by <b>{delivery}</b>
+                </div>
+                <div style="font-size: 0.85rem; opacity: 0.85; margin-top: 8px;">
+                    ⚠️ Over £25K threshold — PO released pending Category Manager review.
+                </div>
             </div>
-            <div style="font-size: 0.95rem; opacity: 0.95;">
-                Awarded to <b>{result.get('winner_supplier', '—')}</b> at
-                <b>£{result.get('agreed_price', 0):,.2f}</b> ·
-                Savings <b>£{result.get('savings', 0):,.0f}</b>
-                ({result.get('savings_pct', 0):.1f}%) ·
-                Delivery by <b>{result.get('delivery_date', '—')}</b>
-            </div>
-            <div style="font-size: 0.85rem; opacity: 0.85; margin-top: 8px;">
-                Open each vendor tab below to see the full 1-on-1 negotiation. The Award Decision tab shows the comparison.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
     st.session_state.just_completed = False
 
 # ── Request selector ───────────────────────────────────────────────────────────

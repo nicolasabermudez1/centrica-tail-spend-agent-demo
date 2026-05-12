@@ -419,18 +419,50 @@ if st.session_state.intake_complete and st.session_state.intake_data:
             product = intake.get("description", "Item")
             short_product = product if len(product) <= 70 else product[:67] + "..."
             buyer_dept = st.session_state.get("buyer_dept") or intake.get("buyer_department", "Procurement")
-            st.success(
-                f"✅ **{short_product} — Procured.**  \n\n"
-                f"Purchase Order **{result['po_number']}** issued to **{result['winner_supplier']}** "
-                f"at £{result['agreed_price']:,.0f} (saving £{result['savings']:,.0f}).  \n\n"
-                f"📧 **Please review your email confirmation** — sent to your inbox ({buyer_dept}).",
-                icon="✅",
-            )
+            po_number = result['po_number']
+            final_price = result['agreed_price']
+            TAIL_SPEND_THRESHOLD = 25000
+
+            # Prominent PO# placed banner (tail-spend auto-approved)
+            if final_price < TAIL_SPEND_THRESHOLD:
+                st.markdown(
+                    '<div style="background:linear-gradient(135deg,#85DB9C 0%,#16A34A 100%);'
+                    'color:white;padding:2.2rem 2rem;border-radius:18px;'
+                    'box-shadow:0 6px 22px rgba(22,163,74,0.28);text-align:center;'
+                    'margin:1.5rem 0;border:3px solid #16A34A;">'
+                    '<div style="font-size:0.85rem;font-weight:700;letter-spacing:0.16em;'
+                    'text-transform:uppercase;opacity:0.95;margin-bottom:10px;">'
+                    '✓ Purchase Order Placed &middot; Tail-Spend Auto-Approved</div>'
+                    f'<div style="font-size:3rem;font-weight:900;line-height:1.1;'
+                    'font-family:\'Courier New\',monospace;letter-spacing:0.04em;'
+                    f'margin:6px 0 14px 0;">{po_number}</div>'
+                    f'<div style="font-size:1rem;opacity:0.97;">'
+                    f'Awarded to <b>{result["winner_supplier"]}</b> &middot; '
+                    f'<b>£{final_price:,.0f}</b> (saved £{result["savings"]:,.0f})</div>'
+                    f'<div style="font-size:0.88rem;opacity:0.92;margin-top:14px;'
+                    'padding-top:12px;border-top:1px solid rgba(255,255,255,0.3);">'
+                    f'Order value under £{TAIL_SPEND_THRESHOLD:,} &mdash; no further approval required. '
+                    f'<br>📧 Email confirmation sent to {buyer_dept} &middot; '
+                    f'Delivery by {result["delivery_date"]}</div>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                # Over the tail-spend threshold — flagged for review
+                st.success(
+                    f"✅ **{short_product} — Procured.**  \n\n"
+                    f"Purchase Order **{po_number}** issued to **{result['winner_supplier']}** "
+                    f"at £{final_price:,.0f} (saving £{result['savings']:,.0f}).  \n\n"
+                    f"⚠️ Order value exceeds the £{TAIL_SPEND_THRESHOLD:,} tail-spend threshold — "
+                    f"PO released pending Category Manager review.  \n\n"
+                    f"📧 Email confirmation sent to {buyer_dept}.",
+                    icon="✅",
+                )
             try:
-                st.toast(f"✅ {short_product[:40]}... procured — see email confirmation", icon="📧")
+                st.toast(f"✅ {po_number} placed — see email confirmation", icon="📧")
             except Exception:
                 pass
-            time.sleep(3.5)
+            time.sleep(4.0)
             st.switch_page("pages/2_Live_Negotiation.py")
         else:
             st.error(f"⚠️ **Escalated to Category Manager** — {result.get('reason', 'No agreement reached.')}")
